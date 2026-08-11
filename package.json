@@ -1,0 +1,28 @@
+{
+  "name": "qflow",
+  "version": "1.0.0",
+  "description": "QFlow — Virtual Queue & Appointment Management Platform",
+  "main": "src/server/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server/server.js",
+    "dev:server": "nodemon src/server/server.js",
+    "dev:client": "vite --config src/client/vite.config.js src/client",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "build:client": "vite build --config src/client/vite.config.js src/client"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "mongoose": "^8.10.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "nodemon": "^3.1.9",
+    "vite": "^6.1.0"
+  }
+}
