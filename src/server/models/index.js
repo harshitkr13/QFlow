@@ -1,6 +1,7 @@
 export { default as User } from './User.js';
 export { default as Patient } from './Patient.js';
 export { default as Doctor } from './Doctor.js';
+export { default as Staff } from './Staff.js';
 export { default as Clinic } from './Clinic.js';
 export { default as Specialty } from './Specialty.js';
 export { default as Appointment } from './Appointment.js';

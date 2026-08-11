@@ -1,5 +1,8 @@
 # Phase 02 — Data Models
 
+> **Phase 02 Amendment — Staff Profile:**
+> Added `Staff` domain profile model after Phase 03 authorization review. Clinic-level authorization requires an explicit `User` $\rightarrow$ `Staff` $\rightarrow$ `Clinic` relationship to scope staff operations (`CALL_NEXT`, walk-in registration, check-in) without polluting `User` as authentication identity.
+
 ## Goal
 Create the core domain model before business workflows.
 
@@ -8,6 +11,7 @@ Create the core domain model before business workflows.
 - Clinic
 - Doctor
 - Patient
+- Staff
 - Specialty
 - Appointment
 - QueueEntry

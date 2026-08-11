@@ -5,6 +5,7 @@ import {
   User,
   Patient,
   Doctor,
+  Staff,
   Clinic,
   Specialty,
   Appointment,
@@ -25,6 +26,7 @@ export const runModelValidation = async () => {
     { name: 'User', model: User },
     { name: 'Patient', model: Patient },
     { name: 'Doctor', model: Doctor },
+    { name: 'Staff', model: Staff },
     { name: 'Clinic', model: Clinic },
     { name: 'Specialty', model: Specialty },
     { name: 'Appointment', model: Appointment },
@@ -37,21 +39,31 @@ export const runModelValidation = async () => {
 
   console.log(`✓ All ${models.length} models imported successfully.`);
 
-  // 2. Invariant Check: Appointment must NOT contain tokenNumber
+  // 2. Invariant Check: Staff model userId uniqueness & clinicId index
+  const staffIndexes = Staff.schema.indexes();
+  const hasStaffUserIdUnique = staffIndexes.some(([fields, options]) => {
+    return fields.userId === 1 && options?.unique === true;
+  });
+  if (!hasStaffUserIdUnique) {
+    throw new Error('INVARIANT VIOLATION: Staff model missing unique index on userId!');
+  }
+  console.log('✓ Invariant Verified: Staff unique index on userId confirmed.');
+
+  // 3. Invariant Check: Appointment must NOT contain tokenNumber
   const appointmentPaths = Object.keys(Appointment.schema.paths);
   if (appointmentPaths.includes('tokenNumber')) {
     throw new Error('INVARIANT VIOLATION: Appointment schema must NOT contain tokenNumber!');
   }
   console.log('✓ Invariant Verified: Appointment schema does NOT contain tokenNumber.');
 
-  // 3. Invariant Check: QueueEntry appointmentId must NOT be required (walk-in compatibility)
+  // 4. Invariant Check: QueueEntry appointmentId must NOT be required (walk-in compatibility)
   const appointmentIdPath = QueueEntry.schema.path('appointmentId');
   if (appointmentIdPath.isRequired) {
     throw new Error('INVARIANT VIOLATION: QueueEntry.appointmentId must be optional for walk-in support!');
   }
   console.log('✓ Invariant Verified: QueueEntry.appointmentId is optional (walk-in supported).');
 
-  // 4. Invariant Check: QueueCounter compound index
+  // 5. Invariant Check: QueueCounter compound index
   const queueCounterIndexes = QueueCounter.schema.indexes();
   const hasQueueCounterCompoundIndex = queueCounterIndexes.some(([fields, options]) => {
     return (
@@ -66,7 +78,7 @@ export const runModelValidation = async () => {
   }
   console.log('✓ Invariant Verified: QueueCounter compound unique index on clinicId + doctorId + date confirmed.');
 
-  // 5. Invariant Check: Rating uniqueness per queueEntryId
+  // 6. Invariant Check: Rating uniqueness per queueEntryId
   const ratingIndexes = Rating.schema.indexes();
   const hasRatingUniqueIndex = ratingIndexes.some(([fields, options]) => {
     return fields.queueEntryId === 1 && options?.unique === true;
@@ -76,7 +88,7 @@ export const runModelValidation = async () => {
   }
   console.log('✓ Invariant Verified: Rating unique index per queueEntryId confirmed.');
 
-  // 6. Connect to MongoDB Atlas and build/sync schema indexes
+  // 7. Connect to MongoDB Atlas and build/sync schema indexes
   await connectDB();
   console.log(`✓ Connected to Database: ${mongoose.connection.host}/${mongoose.connection.name}`);
 

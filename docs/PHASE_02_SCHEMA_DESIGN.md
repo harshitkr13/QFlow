@@ -1,20 +1,24 @@
 # QFlow Phase 02 — Schema Design
 
+> **Phase 02 Amendment — Staff Profile:**
+> Added `Staff` domain profile model after Phase 03 authorization review. Clinic-level authorization requires an explicit `User` $\rightarrow$ `Staff` $\rightarrow$ `Clinic` relationship to scope staff operations (`CALL_NEXT`, walk-in registration, check-in) without polluting `User` as authentication identity.
+
 ## 1. Schema Overview
 
-Phase 02 establishes the foundational database design for QFlow using Mongoose and MongoDB. The system architecture enforces a clean separation of concerns across 11 core domain models:
+Phase 02 establishes the foundational database design for QFlow using Mongoose and MongoDB. The system architecture enforces a clean separation of concerns across 12 core domain models:
 
 1. **`User`**: Account authentication, credentials, and role authorization.
 2. **`Patient`**: Patient-specific profile, demographic data, and contact preferences.
 3. **`Doctor`**: Medical profile, qualifications, consultation fees, clinic assignments, and live operational status.
-4. **`Clinic`**: Physical healthcare facility details, address, geospatial coordinates, and operational parameters.
-5. **`Specialty`**: Medical taxonomy/category lookup entity (e.g., Cardiology, Neurology, Pediatrics).
-6. **`Appointment`**: Planned future reservations for specific time windows (`BOOKED` state). Does **NOT** hold operational queue tokens.
-7. **`QueueEntry`**: Active operational queue participation records for today's session. Holds allocated token numbers.
-8. **`QueueCounter`**: Dedicated atomic sequence counter for allocating sequential, non-colliding token numbers per `{ clinicId, doctorId, date }`.
-9. **`DoctorSchedule`**: Recurring weekly operational working hours, multi-shift configurations, and daily break/lunch periods.
-10. **`QueueHistory`**: Append-only operational audit log tracking every state transition, staff action, and timestamp.
-11. **`Rating`**: Verified post-consultation patient feedback tied exclusively to completed consultations.
+4. **`Staff`**: Staff profile linking authentication identity (`User`) to assigned clinic (`Clinic`) for operational queue administration.
+5. **`Clinic`**: Physical healthcare facility details, address, geospatial coordinates, and operational parameters.
+6. **`Specialty`**: Medical taxonomy/category lookup entity (e.g., Cardiology, Neurology, Pediatrics).
+7. **`Appointment`**: Planned future reservations for specific time windows (`BOOKED` state). Does **NOT** hold operational queue tokens.
+8. **`QueueEntry`**: Active operational queue participation records for today's session. Holds allocated token numbers.
+9. **`QueueCounter`**: Dedicated atomic sequence counter for allocating sequential, non-colliding token numbers per `{ clinicId, doctorId, date }`.
+10. **`DoctorSchedule`**: Recurring weekly operational working hours, multi-shift configurations, and daily break/lunch periods.
+11. **`QueueHistory`**: Append-only operational audit log tracking every state transition, staff action, and timestamp.
+12. **`Rating`**: Verified post-consultation patient feedback tied exclusively to completed consultations.
 
 ---
 
