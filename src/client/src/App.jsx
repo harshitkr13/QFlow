@@ -1,5 +1,13 @@
 import { useState, useEffect } from 'react';
-import { fetchSpecialties, discoverDoctors, fetchDoctorProfile } from './services/api';
+import {
+  fetchSpecialties,
+  discoverDoctors,
+  fetchDoctorProfile,
+  fetchDoctorAvailability,
+  createAppointment,
+  fetchMyAppointments,
+  cancelAppointment,
+} from './services/api';
 import './App.css';
 
 export default function App() {
@@ -21,10 +29,27 @@ export default function App() {
   const [coords, setCoords] = useState(null);
   const [locStatus, setLocStatus] = useState('Location: Not requested');
 
-  // Modal / Route state
+  // Modal / Profile state
   const [selectedDoctor, setSelectedDoctor] = useState(null);
   const [profileData, setProfileData] = useState(null);
-  const [bookingTransition, setBookingTransition] = useState(null);
+
+  // Stage 3 Booking State
+  const [bookingDoctor, setBookingDoctor] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const today = new Date();
+    return today.toISOString().split('T')[0];
+  });
+  const [availability, setAvailability] = useState(null);
+  const [loadingAvail, setLoadingAvail] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [bookingSuccess, setBookingSuccess] = useState(null);
+  const [bookingError, setBookingError] = useState(null);
+
+  // Patient Auth token state (simulated for UI demonstration)
+  const [patientToken, setPatientToken] = useState('');
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
+  const [myAppointments, setMyAppointments] = useState([]);
+  const [viewTab, setViewTab] = useState('discover'); // 'discover' | 'my_appointments'
 
   // Load Specialties
   useEffect(() => {
@@ -86,8 +111,26 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadDiscovery();
-  }, [selectedSpecialty, sort, minRating, minExperience, maxFee, doctorGender, coords, radiusKm]);
+    if (viewTab === 'discover') {
+      loadDiscovery();
+    }
+  }, [selectedSpecialty, sort, minRating, minExperience, maxFee, doctorGender, coords, radiusKm, viewTab]);
+
+  // Load Availability when bookingDoctor or selectedDate changes
+  useEffect(() => {
+    if (bookingDoctor && selectedDate) {
+      setLoadingAvail(true);
+      setSelectedSlot(null);
+      fetchDoctorAvailability(bookingDoctor._id, selectedDate).then((res) => {
+        if (res.ok && res.data) {
+          setAvailability(res.data);
+        } else {
+          setAvailability(null);
+        }
+        setLoadingAvail(false);
+      });
+    }
+  }, [bookingDoctor, selectedDate]);
 
   // View Doctor Profile (Stage 2)
   const handleOpenProfile = async (docId) => {
@@ -98,33 +141,230 @@ export default function App() {
     }
   };
 
-  // Proceed to Appointment CTA (Stage 3 Boundary)
+  // Proceed to Appointment CTA (Stage 3 Transition)
   const handleProceedToAppointment = (doctor) => {
     setSelectedDoctor(null);
-    setBookingTransition(doctor);
+    setBookingDoctor(doctor);
+    setBookingSuccess(null);
+    setBookingError(null);
+  };
+
+  // Submit Booking
+  const handleConfirmBooking = async () => {
+    if (!patientToken) {
+      setShowAuthPrompt(true);
+      return;
+    }
+    if (!bookingDoctor || !selectedSlot || !selectedDate) return;
+
+    setBookingError(null);
+    const bookingBody = {
+      doctorId: bookingDoctor._id,
+      appointmentDate: selectedDate,
+      timeSlot: selectedSlot,
+    };
+
+    const res = await createAppointment(bookingBody, patientToken);
+    if (res.ok && res.data.success) {
+      setBookingSuccess(res.data.appointment);
+      setBookingDoctor(null);
+    } else {
+      setBookingError(res.data?.message || res.error || 'Booking failed');
+    }
+  };
+
+  // Load Patient Appointments
+  const loadMyAppointments = async () => {
+    if (!patientToken) return;
+    const res = await fetchMyAppointments(patientToken);
+    if (res.ok && res.data.appointments) {
+      setMyAppointments(res.data.appointments);
+    }
+  };
+
+  useEffect(() => {
+    if (viewTab === 'my_appointments' && patientToken) {
+      loadMyAppointments();
+    }
+  }, [viewTab, patientToken]);
+
+  // Cancel Appointment
+  const handleCancelAppointment = async (apptId) => {
+    if (!patientToken) return;
+    const res = await cancelAppointment(apptId, patientToken, 'Cancelled by patient from dashboard');
+    if (res.ok && res.data.success) {
+      loadMyAppointments();
+    }
   };
 
   return (
     <div className="container">
       <header className="header">
         <h1 className="title">QFlow Healthcare</h1>
-        <p className="subtitle">Phase 05 — Patient Discovery & Doctor Search</p>
-      </header>
-
-      {bookingTransition ? (
-        <div className="card">
-          <h2>Stage 3 Transition — Appointment Decision</h2>
-          <p style={{ marginTop: '0.5rem', color: 'var(--text-muted)' }}>
-            Transitioned to booking route for <strong>{bookingTransition.fullName}</strong> ({bookingTransition.clinic?.name || 'Assigned Clinic'}).
-          </p>
-          <div className="test-output" style={{ marginTop: '1rem' }}>
-            ✓ Stage 3 Boundary Reached! (Zero database state mutations occurred. No appointments, queue entries, or tokens were created).
-          </div>
-          <button className="btn btn-secondary" style={{ marginTop: '1rem' }} onClick={() => setBookingTransition(null)}>
-            ← Back to Patient Discovery
+        <p className="subtitle">Phase 06 — Appointment Booking & Scheduling</p>
+        <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+          <button
+            className={`btn ${viewTab === 'discover' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => { setViewTab('discover'); setBookingDoctor(null); setBookingSuccess(null); }}
+          >
+            🔍 Patient Discovery
+          </button>
+          <button
+            className={`btn ${viewTab === 'my_appointments' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setViewTab('my_appointments')}
+          >
+            📅 My Appointments
           </button>
         </div>
+      </header>
+
+      {/* Auth Token Drawer for Testing */}
+      <div style={{ background: '#090d16', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem' }}>
+        <span style={{ color: 'var(--text-muted)' }}>Patient JWT Token: </span>
+        <input
+          type="text"
+          className="filter-input"
+          placeholder="Paste Patient JWT Token here to test booking"
+          value={patientToken}
+          onChange={(e) => setPatientToken(e.target.value.trim())}
+          style={{ width: '60%', marginLeft: '0.5rem' }}
+        />
+      </div>
+
+      {/* VIEW: Stage 3 Booking Confirmation Screen */}
+      {bookingSuccess ? (
+        <div className="card">
+          <h2 style={{ color: 'var(--success-text)', marginBottom: '0.5rem' }}>✓ Appointment Booked Successfully!</h2>
+          <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>Your online appointment has been confirmed in `BOOKED` status.</p>
+
+          <div className="doctor-card-details" style={{ gridTemplateColumns: '1fr', gap: '0.5rem', background: '#090d16', padding: '1rem', borderRadius: '8px' }}>
+            <div><strong>Appointment ID:</strong> {bookingSuccess._id}</div>
+            <div><strong>Date:</strong> {bookingSuccess.appointmentDate}</div>
+            <div><strong>Time Slot:</strong> {bookingSuccess.timeSlot?.startTime} - {bookingSuccess.timeSlot?.endTime}</div>
+            <div><strong>Status:</strong> <span className="status-badge status-connected">BOOKED</span></div>
+            <div><strong>Instructions:</strong> Please arrive at the clinic 15 minutes before your time slot for Staff Check-In.</div>
+          </div>
+
+          <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={() => setBookingSuccess(null)}>
+            Back to Patient Discovery
+          </button>
+        </div>
+      ) : bookingDoctor ? (
+        /* VIEW: Stage 3 Booking Page */
+        <div className="card">
+          <button className="btn btn-secondary" style={{ marginBottom: '1rem' }} onClick={() => setBookingDoctor(null)}>
+            ← Back to Profile
+          </button>
+
+          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem' }}>
+            <img
+              src={bookingDoctor.photoUrl || 'https://via.placeholder.com/150'}
+              alt={bookingDoctor.fullName}
+              style={{ width: '60px', height: '60px', borderRadius: '50%', objectFit: 'cover' }}
+            />
+            <div>
+              <h3>{bookingDoctor.fullName}</h3>
+              <p style={{ color: 'var(--primary)', fontSize: '0.85rem' }}>{bookingDoctor.specialty?.name}</p>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>📍 {bookingDoctor.clinic?.name}</p>
+            </div>
+          </div>
+
+          {bookingError && <div style={{ color: 'var(--error-text)', marginBottom: '1rem' }}>{bookingError}</div>}
+
+          {/* Date Selector */}
+          <div style={{ marginBottom: '1rem' }}>
+            <label className="filter-label">Select Date: </label>
+            <input
+              type="date"
+              className="filter-input"
+              value={selectedDate}
+              min={new Date().toISOString().split('T')[0]}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              style={{ marginLeft: '0.5rem' }}
+            />
+          </div>
+
+          {/* Time Slots Grid */}
+          <h4 style={{ color: 'var(--primary)', marginBottom: '0.5rem' }}>Available Time Slots</h4>
+          {loadingAvail ? (
+            <div className="empty-state">Loading availability...</div>
+          ) : !availability || availability.availableSlots.length === 0 ? (
+            <div className="empty-state">No available slots for selected date.</div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1.25rem' }}>
+              {availability.availableSlots.map((slot, idx) => (
+                <button
+                  key={idx}
+                  className={`category-chip ${selectedSlot?.startTime === slot.startTime ? 'active' : ''}`}
+                  onClick={() => setSelectedSlot(slot)}
+                >
+                  {slot.startTime} - {slot.endTime}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Summary & Confirm */}
+          {selectedSlot && (
+            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', marginBottom: '1rem' }}>
+              <h4>Booking Summary</h4>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                Date: {selectedDate} | Time: {selectedSlot.startTime} - {selectedSlot.endTime} | Fee: ₹{bookingDoctor.consultationFee || 0}
+              </p>
+            </div>
+          )}
+
+          <button
+            className="btn btn-primary"
+            style={{ width: '100%', padding: '0.85rem' }}
+            disabled={!selectedSlot}
+            onClick={handleConfirmBooking}
+          >
+            CONFIRM APPOINTMENT
+          </button>
+        </div>
+      ) : viewTab === 'my_appointments' ? (
+        /* VIEW: Patient Appointments Dashboard */
+        <div className="card">
+          <h2>My Appointments</h2>
+          {!patientToken ? (
+            <div className="empty-state">Please paste a valid Patient JWT token above to view your appointments.</div>
+          ) : myAppointments.length === 0 ? (
+            <div className="empty-state">No appointments found.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
+              {myAppointments.map((appt) => (
+                <div key={appt._id} style={{ background: '#090d16', border: '1px solid var(--border-color)', padding: '1rem', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <strong>{appt.doctorId?.fullName || 'Doctor'}</strong>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>📍 {appt.clinicId?.name}</div>
+                      <div style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                        📅 {appt.appointmentDate} @ {appt.timeSlot?.startTime} - {appt.timeSlot?.endTime}
+                      </div>
+                    </div>
+                    <div>
+                      <span className={`status-badge ${appt.status === 'BOOKED' ? 'status-connected' : 'status-warning'}`}>
+                        {appt.status}
+                      </span>
+                      {appt.status === 'BOOKED' && (
+                        <button
+                          className="btn btn-secondary"
+                          style={{ display: 'block', marginTop: '0.5rem', fontSize: '0.75rem' }}
+                          onClick={() => handleCancelAppointment(appt._id)}
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       ) : (
+        /* VIEW: Patient Discovery View */
         <div className="discovery-layout">
           {/* Location Banner */}
           <div className="location-banner">

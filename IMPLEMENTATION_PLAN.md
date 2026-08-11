@@ -4,7 +4,7 @@
 
 Implement in dependency order. Do not build all UI first.
 
-### Phase 01 — Project Foundation
+### Phase 01 — Project Foundation (COMPLETE)
 - repository structure
 - React app
 - Express server
@@ -16,7 +16,7 @@ Implement in dependency order. Do not build all UI first.
 Deliverable:
 Frontend and backend communicate successfully.
 
-### Phase 02 — Data Models
+### Phase 02 — Data Models (COMPLETE)
 Create and validate:
 - User
 - Clinic
@@ -29,11 +29,12 @@ Create and validate:
 - DoctorSchedule
 - QueueHistory
 - Rating
+- Staff (Phase 02 Amendment)
 
 Deliverable:
 Stable schema and relationships.
 
-### Phase 03 — Authentication & Authorization
+### Phase 03 — Authentication & Authorization (COMPLETE)
 - registration
 - login
 - logout
@@ -45,7 +46,7 @@ Stable schema and relationships.
 Deliverable:
 Patient, staff, doctor and admin can access only permitted areas.
 
-### Phase 04 — Clinic, Doctor & Schedule Management
+### Phase 04 — Clinic, Doctor & Schedule Management (COMPLETE)
 - clinic profile
 - doctor profile
 - qualifications
@@ -59,7 +60,7 @@ Patient, staff, doctor and admin can access only permitted areas.
 Deliverable:
 Admin can configure operational doctor data.
 
-### Phase 05 — Patient Discovery
+### Phase 05 — Patient Discovery (COMPLETE)
 - location selection
 - specialty selection
 - doctor list
@@ -69,19 +70,20 @@ Admin can configure operational doctor data.
 - doctor profile
 - clean discovery UX
 
-Important:
-Do not expose queue counts on discovery cards.
+Deliverable:
+Stage 1 & Stage 2 patient discovery with operational blindness.
 
-### Phase 06 — Appointment Flow
+### Phase 06 — Appointment Booking & Scheduling (DESIGN SPECIFIED)
 - choose doctor
 - choose date/time slot
 - validate availability
 - create appointment (`BOOKED` state, no token allocated)
 - cancellation
-- clinic check-in (creates `QueueEntry`, allocates token via `QueueCounter`)
+- clinic check-in (transitions status to `CHECKED_IN`, handoff to Phase 07)
+- Detailed Specification: `docs/PHASE_06_APPOINTMENT_DESIGN.md`
 
 Deliverable:
-Complete online appointment and check-in path.
+Complete online appointment booking and scheduling design.
 
 ### Phase 07 — Walk-in Flow
 - receptionist patient search/create

@@ -54,10 +54,24 @@ const appointmentSchema = new mongoose.Schema(
 );
 
 // Indexes
+// Partial Unique Index: Only active appointments ('BOOKED', 'CHECKED_IN') participate in uniqueness per doctor, date, and slot time.
 appointmentSchema.index(
-  { doctorId: 1, appointmentDate: 1, 'timeSlot.startTime': 1, status: 1 },
-  { name: 'doctor_date_slot_status_idx' }
+  {
+    doctorId: 1,
+    appointmentDate: 1,
+    'timeSlot.startTime': 1,
+  },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: {
+        $in: ['BOOKED', 'CHECKED_IN'],
+      },
+    },
+    name: 'unique_active_doctor_slot_idx',
+  }
 );
+
 appointmentSchema.index({ patientId: 1, appointmentDate: -1 });
 
 export const Appointment = mongoose.model('Appointment', appointmentSchema);
