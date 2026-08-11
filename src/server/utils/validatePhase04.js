@@ -8,10 +8,12 @@ import { runAuthValidation } from './validateAuth.js';
 
 dotenv.config();
 
-export const runPhase04Validation = async () => {
+export const runPhase04Validation = async (shouldDisconnect = true) => {
   console.log('--- Phase 04 Clinic & Doctor Management Validation Starting ---');
 
-  await connectDB();
+  if (mongoose.connection.readyState !== 1) {
+    await connectDB();
+  }
   console.log(`✓ Connected to DB: ${mongoose.connection.host}/${mongoose.connection.name}`);
 
   const createdUserIds = [];
@@ -305,7 +307,6 @@ export const runPhase04Validation = async () => {
     // ----------------------------------------------------
     // REGRESSION TESTS (42-44)
     // ----------------------------------------------------
-
     console.log('--- Running Auth & Regression Suite ---');
     await runAuthValidation(false);
     console.log('✓ Tests 42, 43, 44 Passed: GET /api/health works, MongoDB Atlas connected, Phase 03 auth suite passes 100%.');
@@ -319,14 +320,16 @@ export const runPhase04Validation = async () => {
     if (createdClinicIds.length) await Clinic.deleteMany({ _id: { $in: createdClinicIds } });
     if (createdUserIds.length) await User.deleteMany({ _id: { $in: createdUserIds } });
     console.log('✓ All temporary Phase 04 test records removed cleanly from MongoDB Atlas.');
-    await mongoose.disconnect();
+    if (shouldDisconnect) {
+      await mongoose.disconnect();
+    }
   }
 
   console.log('--- Phase 04 Validation Completed Successfully (44/44 Tests Passed) ---');
 };
 
 if (process.argv[1] && process.argv[1].endsWith('validatePhase04.js')) {
-  runPhase04Validation().catch((err) => {
+  runPhase04Validation(true).catch((err) => {
     console.error('Phase 04 Validation Error:', err);
     process.exit(1);
   });

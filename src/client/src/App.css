@@ -1,11 +1,12 @@
 .container {
-  max-width: 600px;
+  max-width: 1000px;
   width: 100%;
   background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 12px;
-  padding: 2rem;
+  padding: 1.5rem;
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+  margin: 0 auto;
 }
 
 .header {
@@ -25,78 +26,239 @@
   color: var(--text-muted);
 }
 
-.card {
-  background: rgba(15, 23, 42, 0.6);
+.discovery-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.location-banner {
+  background: rgba(30, 41, 59, 0.7);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  padding: 1.25rem;
-  margin-bottom: 1.5rem;
-}
-
-.status-badge {
-  display: inline-block;
-  padding: 0.25rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-left: 0.5rem;
-}
-
-.status-connected {
-  background-color: var(--success-bg);
-  color: var(--success-text);
-}
-
-.status-disconnected {
-  background-color: var(--error-bg);
-  color: var(--error-text);
-}
-
-.status-warning {
-  background-color: var(--warning-bg);
-  color: var(--warning-text);
-}
-
-.info-row {
+  padding: 1rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.75rem 0;
-  border-bottom: 1px solid var(--border-color);
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
-.info-row:last-child {
-  border-bottom: none;
-}
-
-.info-label {
-  color: var(--text-muted);
-  font-size: 0.9rem;
-}
-
-.info-value {
-  font-weight: 500;
-  font-size: 0.9rem;
-  font-family: monospace;
-}
-
-.actions {
+.location-info {
   display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.categories-bar {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+}
+
+.category-chip {
+  padding: 0.5rem 1rem;
+  border-radius: 9999px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.category-chip.active {
+  background: var(--primary);
+  color: #0f172a;
+  font-weight: 600;
+  border-color: var(--primary);
+}
+
+.filters-panel {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+  min-width: 140px;
+}
+
+.filter-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.filter-input, .filter-select {
+  padding: 0.5rem;
+  background: #090d16;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-main);
+  font-size: 0.85rem;
+}
+
+.doctors-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 1rem;
 }
 
+.doctor-card {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.doctor-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+}
+
+.doctor-card-header {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.doctor-avatar {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #1e293b;
+  border: 2px solid var(--border-color);
+}
+
+.doctor-info-primary {
+  display: flex;
+  flex-direction: column;
+}
+
+.doc-name {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.doc-specialty {
+  font-size: 0.85rem;
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.doc-clinic {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.2rem;
+}
+
+.doctor-card-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+  padding: 0.5rem 0;
+  border-top: 1px dashed var(--border-color);
+  border-bottom: 1px dashed var(--border-color);
+  font-size: 0.8rem;
+}
+
+.detail-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--text-main);
+}
+
+.rating-star {
+  color: #f59e0b;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1rem;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: #0f172a;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  max-width: 650px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 1.5rem;
+  position: relative;
+}
+
+.modal-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+
+.schedule-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.schedule-table th, .schedule-table td {
+  border: 1px solid var(--border-color);
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.schedule-table th {
+  background: rgba(30, 41, 59, 0.6);
+  color: var(--primary);
+}
+
 .btn {
-  flex: 1;
-  padding: 0.75rem 1rem;
+  padding: 0.6rem 1rem;
   border-radius: 6px;
   font-family: var(--font-family);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.2s ease;
   border: none;
+  transition: all 0.2s ease;
 }
 
 .btn-primary {
@@ -118,17 +280,8 @@
   background-color: rgba(255, 255, 255, 0.05);
 }
 
-.test-output {
-  margin-top: 1rem;
-  padding: 1rem;
-  background: #090d16;
-  border-radius: 6px;
-  border: 1px solid var(--border-color);
-  font-family: monospace;
-  font-size: 0.8rem;
-  color: #a5f3fc;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 200px;
-  overflow-y: auto;
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
 }

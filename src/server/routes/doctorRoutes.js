@@ -3,6 +3,7 @@ import {
   getDoctors,
   getDoctorById,
   updateDoctorSelf,
+  discoverDoctors,
 } from '../controllers/doctorController.js';
 import {
   getDoctorSchedule,
@@ -15,6 +16,9 @@ import {
 import { protect, authorize } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
+
+// Patient Discovery Endpoint (Stage 1)
+router.get('/discover', discoverDoctors);
 
 // Public / Protected doctor endpoints
 router.get('/', getDoctors);
