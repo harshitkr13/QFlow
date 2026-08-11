@@ -4,6 +4,11 @@ import dotenv from 'dotenv';
 import { connectDB } from './config/db.js';
 import healthRoutes from './routes/healthRoutes.js';
 import authRoutes from './routes/authRoutes.js';
+import clinicRoutes from './routes/clinicRoutes.js';
+import specialtyRoutes from './routes/specialtyRoutes.js';
+import doctorRoutes from './routes/doctorRoutes.js';
+import staffRoutes from './routes/staffRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
 import { notFoundHandler, errorHandler } from './middleware/errorMiddleware.js';
 
 // Load environment variables
@@ -24,6 +29,11 @@ app.use(express.urlencoded({ extended: true }));
 // API Routes
 app.use('/api', healthRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/clinics', clinicRoutes);
+app.use('/api/specialties', specialtyRoutes);
+app.use('/api/doctors', doctorRoutes);
+app.use('/api/staff', staffRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Error Handling Middleware
 app.use(notFoundHandler);

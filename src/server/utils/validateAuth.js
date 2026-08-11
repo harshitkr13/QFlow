@@ -9,25 +9,20 @@ import { protect, authorize, requirePatientOwnership, requireDoctorOwnership, re
 
 dotenv.config();
 
-export const runAuthValidation = async () => {
+export const runAuthValidation = async (shouldDisconnect = true) => {
   console.log('--- Phase 03 Authentication & Authorization Validation Starting ---');
 
-  await connectDB();
+  if (mongoose.connection.readyState !== 1) {
+    await connectDB();
+  }
   console.log(`✓ Connected to DB: ${mongoose.connection.host}/${mongoose.connection.name}`);
 
   const testEmail = `test_patient_${Date.now()}@example.com`;
   const testPassword = 'Password123!';
   let createdUserIds = [];
   let createdPatientIds = [];
-  let createdDoctorIds = [];
-  let createdStaffIds = [];
-  let createdClinicIds = [];
 
   try {
-    // ----------------------------------------------------
-    // REGISTRATION TESTS
-    // ----------------------------------------------------
-
     // Test 1: Patient registration succeeds
     const hashedPassword = await bcrypt.hash(testPassword, 10);
     const user = await User.create({
@@ -63,45 +58,38 @@ export const runAuthValidation = async () => {
       }
     }
 
-    // Test 3, 4, 5: Client cannot register as DOCTOR, STAFF, or ADMIN (role overriding validation)
+    // Test 3, 4, 5: Role escalation checks
     const testEscalationRole = (suppliedRole) => {
-      const forcedRole = 'PATIENT'; // Forced by controller
-      if (forcedRole === suppliedRole) {
-        throw new Error(`Role escalation check failed for ${suppliedRole}`);
-      }
+      const forcedRole = 'PATIENT';
+      if (forcedRole === suppliedRole) throw new Error(`Role escalation check failed for ${suppliedRole}`);
     };
     testEscalationRole('DOCTOR');
     testEscalationRole('STAFF');
     testEscalationRole('ADMIN');
     console.log('✓ Tests 3, 4, 5 Passed: Role escalation to DOCTOR/STAFF/ADMIN prevented.');
 
-    // Test 6: Password is stored hashed in database
+    // Test 6: Password stored as hash
     const dbUser = await User.findById(user._id);
     if (dbUser.password === testPassword || !dbUser.password.startsWith('$2')) {
-      throw new Error('Test 6 Failed: Password stored in plaintext or unhashed!');
+      throw new Error('Test 6 Failed: Password stored in plaintext');
     }
     console.log('✓ Test 6 Passed: Password stored as bcrypt hash.');
 
-    // ----------------------------------------------------
-    // LOGIN TESTS
-    // ----------------------------------------------------
-
-    // Test 7: Correct credentials succeed
+    // Test 7 & 8: Password match/mismatch
     const isMatch = await bcrypt.compare(testPassword, dbUser.password);
-    if (!isMatch) throw new Error('Test 7 Failed: Correct password comparison failed');
+    if (!isMatch) throw new Error('Test 7 Failed');
     console.log('✓ Test 7 Passed: Correct login credentials succeed.');
 
-    // Test 8: Incorrect password fails
     const isWrongMatch = await bcrypt.compare('WrongPassword', dbUser.password);
-    if (isWrongMatch) throw new Error('Test 8 Failed: Incorrect password succeeded');
+    if (isWrongMatch) throw new Error('Test 8 Failed');
     console.log('✓ Test 8 Passed: Incorrect password fails.');
 
-    // Test 9: Unknown email returns generic failure
+    // Test 9: Unknown email returns null
     const unknownUser = await User.findOne({ email: 'nonexistent_user_99999@example.com' });
-    if (unknownUser) throw new Error('Test 9 Failed: Unknown user found');
+    if (unknownUser) throw new Error('Test 9 Failed');
     console.log('✓ Test 9 Passed: Unknown email returns null (generic auth failure).');
 
-    // Test 10: Inactive account is rejected
+    // Test 10: Inactive account status
     const inactiveUser = await User.create({
       email: `inactive_${Date.now()}@example.com`,
       password: hashedPassword,
@@ -109,61 +97,39 @@ export const runAuthValidation = async () => {
       isActive: false,
     });
     createdUserIds.push(inactiveUser._id);
-    if (inactiveUser.isActive) throw new Error('Test 10 Failed: User active status should be false');
+    if (inactiveUser.isActive) throw new Error('Test 10 Failed');
     console.log('✓ Test 10 Passed: Inactive account is flagged as inactive.');
 
-    // ----------------------------------------------------
-    // JWT TESTS
-    // ----------------------------------------------------
-
-    // Test 11: Valid JWT authenticates
+    // Test 11: Valid JWT
     const validToken = generateToken({ id: user._id, role: user.role });
     const decoded = verifyToken(validToken);
-    if (decoded.id !== user._id.toString() || decoded.role !== 'PATIENT') {
-      throw new Error('Test 11 Failed: Decoded JWT payload mismatch');
-    }
+    if (decoded.id !== user._id.toString() || decoded.role !== 'PATIENT') throw new Error('Test 11 Failed');
     console.log('✓ Test 11 Passed: Valid JWT authenticates and yields correct payload.');
 
-    // Test 12: Missing JWT
+    // Test 12, 13, 14, 15: JWT rejection rules
     let req12 = { headers: {} };
     let res12Status = 0;
-    let res12Body = null;
-    let res12 = {
-      status: (s) => { res12Status = s; return res12; },
-      json: (b) => { res12Body = b; return res12; },
-    };
+    let res12 = { status: (s) => { res12Status = s; return res12; }, json: () => res12 };
     await protect(req12, res12, () => {});
-    if (res12Status !== 401) throw new Error('Test 12 Failed: Missing JWT did not return 401');
+    if (res12Status !== 401) throw new Error('Test 12 Failed');
     console.log('✓ Test 12 Passed: Missing JWT rejected with 401.');
 
-    // Test 13 & 14: Malformed / Invalid JWT
     let req13 = { headers: { authorization: 'Bearer invalid.malformed.token' } };
     let res13Status = 0;
-    let res13 = {
-      status: (s) => { res13Status = s; return res13; },
-      json: (b) => { return res13; },
-    };
+    let res13 = { status: (s) => { res13Status = s; return res13; }, json: () => res13 };
     await protect(req13, res13, () => {});
-    if (res13Status !== 401) throw new Error('Test 13/14 Failed: Malformed/Invalid JWT did not return 401');
+    if (res13Status !== 401) throw new Error('Test 13/14 Failed');
     console.log('✓ Tests 13, 14 Passed: Malformed/Invalid JWT rejected with 401.');
 
-    // Test 15: Expired JWT rejected
     const expiredToken = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '-1s' });
     let req15 = { headers: { authorization: `Bearer ${expiredToken}` } };
     let res15Status = 0;
-    let res15 = {
-      status: (s) => { res15Status = s; return res15; },
-      json: (b) => { return res15; },
-    };
+    let res15 = { status: (s) => { res15Status = s; return res15; }, json: () => res15 };
     await protect(req15, res15, () => {});
-    if (res15Status !== 401) throw new Error('Test 15 Failed: Expired JWT did not return 401');
+    if (res15Status !== 401) throw new Error('Test 15 Failed');
     console.log('✓ Test 15 Passed: Expired JWT rejected with 401.');
 
-    // ----------------------------------------------------
-    // AUTHORIZATION TESTS (RBAC)
-    // ----------------------------------------------------
-
-    // Test 16, 17, 18, 19: Role recognition
+    // Test 16-20: RBAC rules
     const testRoleAuth = (userRole, allowedRoles) => {
       let isAllowed = false;
       const middleware = authorize(...allowedRoles);
@@ -185,15 +151,10 @@ export const runAuthValidation = async () => {
     if (!testRoleAuth('ADMIN', ['PATIENT', 'DOCTOR', 'STAFF', 'ADMIN'])) throw new Error('Test 19 Failed');
     console.log('✓ Test 19 Passed: ADMIN role recognized.');
 
-    // Test 20: Unauthorized roles rejected
-    if (testRoleAuth('PATIENT', ['STAFF', 'ADMIN'])) throw new Error('Test 20 Failed: PATIENT allowed on STAFF endpoint');
+    if (testRoleAuth('PATIENT', ['STAFF', 'ADMIN'])) throw new Error('Test 20 Failed');
     console.log('✓ Test 20 Passed: Unauthorized role rejected with 403.');
 
-    // ----------------------------------------------------
-    // OWNERSHIP & CLINIC SCOPING TESTS
-    // ----------------------------------------------------
-
-    // Test 21: Patient ownership context resolves correctly
+    // Test 21-23: Ownership & Scoping
     const otherPatientId = new mongoose.Types.ObjectId();
     let pAuthPass = false;
     const pOwnershipMiddleware = requirePatientOwnership(() => otherPatientId);
@@ -201,10 +162,9 @@ export const runAuthValidation = async () => {
     let pResStatus = 0;
     let pRes = { status: (s) => { pResStatus = s; return pRes; }, json: () => pRes };
     pOwnershipMiddleware(pReq, pRes, () => { pAuthPass = true; });
-    if (pAuthPass || pResStatus !== 403) throw new Error('Test 21 Failed: Cross-patient access was allowed');
+    if (pAuthPass || pResStatus !== 403) throw new Error('Test 21 Failed');
     console.log('✓ Test 21 Passed: Cross-patient resource access rejected with 403.');
 
-    // Test 22: Doctor ownership context resolves correctly
     const docId1 = new mongoose.Types.ObjectId();
     const docId2 = new mongoose.Types.ObjectId();
     let dAuthPass = false;
@@ -213,10 +173,9 @@ export const runAuthValidation = async () => {
     let dResStatus = 0;
     let dRes = { status: (s) => { dResStatus = s; return dRes; }, json: () => dRes };
     dOwnershipMiddleware(dReq, dRes, () => { dAuthPass = true; });
-    if (dAuthPass || dResStatus !== 403) throw new Error('Test 22 Failed: Cross-doctor access was allowed');
+    if (dAuthPass || dResStatus !== 403) throw new Error('Test 22 Failed');
     console.log('✓ Test 22 Passed: Cross-doctor resource access rejected with 403.');
 
-    // Test 23: Staff clinic context resolves correctly
     const clinicA = new mongoose.Types.ObjectId();
     const clinicB = new mongoose.Types.ObjectId();
     let sAuthPass = false;
@@ -225,25 +184,24 @@ export const runAuthValidation = async () => {
     let sResStatus = 0;
     let sRes = { status: (s) => { sResStatus = s; return sRes; }, json: () => sRes };
     sScopeMiddleware(sReq, sRes, () => { sAuthPass = true; });
-    if (sAuthPass || sResStatus !== 403) throw new Error('Test 23 Failed: Cross-clinic staff access was allowed');
+    if (sAuthPass || sResStatus !== 403) throw new Error('Test 23 Failed');
     console.log('✓ Test 23 Passed: Cross-clinic staff queue access rejected with 403.');
 
   } finally {
-    // ----------------------------------------------------
-    // CLEANUP TEST DATA
-    // ----------------------------------------------------
-    console.log('--- Cleaning Up Test Data ---');
+    console.log('--- Cleaning Up Auth Test Data ---');
     if (createdPatientIds.length) await Patient.deleteMany({ _id: { $in: createdPatientIds } });
     if (createdUserIds.length) await User.deleteMany({ _id: { $in: createdUserIds } });
     console.log('✓ All temporary test records removed cleanly from MongoDB Atlas.');
-    await mongoose.disconnect();
+    if (shouldDisconnect) {
+      await mongoose.disconnect();
+    }
   }
 
   console.log('--- Phase 03 Validation Completed Successfully (23/23 Tests Passed) ---');
 };
 
 if (process.argv[1] && process.argv[1].endsWith('validateAuth.js')) {
-  runAuthValidation().catch((err) => {
+  runAuthValidation(true).catch((err) => {
     console.error('Validation Error:', err);
     process.exit(1);
   });
