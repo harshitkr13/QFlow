@@ -72,6 +72,26 @@ queueEntrySchema.index(
   { doctorId: 1, queueDate: 1, tokenNumber: 1 },
   { unique: true, name: 'unique_doctor_date_token' }
 );
+queueEntrySchema.index(
+  { doctorId: 1, patientId: 1, queueDate: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: { $in: ['WAITING', 'CALLED', 'IN_CONSULTATION'] },
+    },
+    name: 'unique_active_patient_queue_idx',
+  }
+);
+queueEntrySchema.index(
+  { appointmentId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      appointmentId: { $type: 'objectId' },
+    },
+    name: 'unique_appointment_queue_entry_idx',
+  }
+);
 queueEntrySchema.index({ doctorId: 1, queueDate: 1, status: 1, joinedAt: 1 });
 queueEntrySchema.index({ patientId: 1, queueDate: -1 });
 

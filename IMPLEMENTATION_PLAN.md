@@ -73,27 +73,28 @@ Admin can configure operational doctor data.
 Deliverable:
 Stage 1 & Stage 2 patient discovery with operational blindness.
 
-### Phase 06 — Appointment Booking & Scheduling (DESIGN SPECIFIED)
+### Phase 06 — Appointment Booking & Scheduling (COMPLETE)
 - choose doctor
 - choose date/time slot
 - validate availability
 - create appointment (`BOOKED` state, no token allocated)
 - cancellation
-- clinic check-in (transitions status to `CHECKED_IN`, handoff to Phase 07)
+- clinic check-in boundary (transitions status to `CHECKED_IN`)
 - Detailed Specification: `docs/PHASE_06_APPOINTMENT_DESIGN.md`
 
 Deliverable:
-Complete online appointment booking and scheduling design.
+Complete online appointment booking and scheduling system.
 
-### Phase 07 — Walk-in Flow
+### Phase 07 — Walk-in Registration & Check-In Entry (DESIGN SPECIFIED)
 - receptionist patient search/create
 - walk-in registration
 - atomic token generation via `QueueCounter`
 - duplicate token protection
-- queue entry creation (`WALK_IN` source)
+- queue entry creation (`WALK_IN` and `ONLINE` sources)
+- Detailed Specification: `docs/PHASE_07_QUEUE_ENTRY_DESIGN.md`
 
 Deliverable:
-Offline-originating patients become digital queue entries safely.
+Operational queue entry registration and token allocation design.
 
 ### Phase 08 — Queue Engine
 Implement state transitions:

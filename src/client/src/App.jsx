@@ -7,6 +7,11 @@ import {
   createAppointment,
   fetchMyAppointments,
   cancelAppointment,
+  searchStaffPatients,
+  createWalkInPatient,
+  registerWalkIn,
+  fetchTodayStaffQueue,
+  checkInAppointment,
 } from './services/api';
 import './App.css';
 
@@ -45,13 +50,23 @@ export default function App() {
   const [bookingSuccess, setBookingSuccess] = useState(null);
   const [bookingError, setBookingError] = useState(null);
 
-  // Patient Auth token state (simulated for UI demonstration)
+  // Patient & Staff Auth token states
   const [patientToken, setPatientToken] = useState('');
-  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
+  const [staffToken, setStaffToken] = useState('');
   const [myAppointments, setMyAppointments] = useState([]);
-  const [viewTab, setViewTab] = useState('discover'); // 'discover' | 'my_appointments'
+  const [viewTab, setViewTab] = useState('discover'); // 'discover' | 'my_appointments' | 'reception'
 
-  // Load Specialties
+  // Reception Dashboard State (Phase 07)
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [selectedStaffPatient, setSelectedStaffPatient] = useState(null);
+  const [newPatientForm, setNewPatientForm] = useState({ fullName: '', phone: '', gender: 'MALE' });
+  const [receptionDoctorId, setReceptionDoctorId] = useState('');
+  const [allocatedTokenCard, setAllocatedTokenCard] = useState(null);
+  const [todayQueue, setTodayQueue] = useState([]);
+  const [receptionMessage, setReceptionMessage] = useState(null);
+
+  // Load Specialties & Doctors
   useEffect(() => {
     fetchSpecialties().then((res) => {
       if (res.ok && res.data.specialties) {
@@ -60,7 +75,6 @@ export default function App() {
     });
   }, []);
 
-  // Request browser geolocation
   const handleGetLocation = () => {
     if (!navigator.geolocation) {
       setLocStatus('Geolocation is not supported by your browser');
@@ -81,7 +95,6 @@ export default function App() {
     );
   };
 
-  // Load Discovery Results
   const loadDiscovery = async () => {
     setLoading(true);
     setError(null);
@@ -104,6 +117,9 @@ export default function App() {
     const res = await discoverDoctors(params);
     if (res.ok && res.data.doctors) {
       setDoctors(res.data.doctors);
+      if (res.data.doctors.length > 0 && !receptionDoctorId) {
+        setReceptionDoctorId(res.data.doctors[0]._id);
+      }
     } else {
       setError(res.data?.message || res.error || 'Failed to discover doctors');
     }
@@ -111,12 +127,11 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (viewTab === 'discover') {
+    if (viewTab === 'discover' || viewTab === 'reception') {
       loadDiscovery();
     }
   }, [selectedSpecialty, sort, minRating, minExperience, maxFee, doctorGender, coords, radiusKm, viewTab]);
 
-  // Load Availability when bookingDoctor or selectedDate changes
   useEffect(() => {
     if (bookingDoctor && selectedDate) {
       setLoadingAvail(true);
@@ -132,7 +147,6 @@ export default function App() {
     }
   }, [bookingDoctor, selectedDate]);
 
-  // View Doctor Profile (Stage 2)
   const handleOpenProfile = async (docId) => {
     const res = await fetchDoctorProfile(docId);
     if (res.ok && res.data.doctor) {
@@ -141,7 +155,6 @@ export default function App() {
     }
   };
 
-  // Proceed to Appointment CTA (Stage 3 Transition)
   const handleProceedToAppointment = (doctor) => {
     setSelectedDoctor(null);
     setBookingDoctor(doctor);
@@ -149,10 +162,9 @@ export default function App() {
     setBookingError(null);
   };
 
-  // Submit Booking
   const handleConfirmBooking = async () => {
     if (!patientToken) {
-      setShowAuthPrompt(true);
+      alert('Please paste a valid Patient JWT token in the drawer above.');
       return;
     }
     if (!bookingDoctor || !selectedSlot || !selectedDate) return;
@@ -173,7 +185,6 @@ export default function App() {
     }
   };
 
-  // Load Patient Appointments
   const loadMyAppointments = async () => {
     if (!patientToken) return;
     const res = await fetchMyAppointments(patientToken);
@@ -188,7 +199,6 @@ export default function App() {
     }
   }, [viewTab, patientToken]);
 
-  // Cancel Appointment
   const handleCancelAppointment = async (apptId) => {
     if (!patientToken) return;
     const res = await cancelAppointment(apptId, patientToken, 'Cancelled by patient from dashboard');
@@ -197,11 +207,85 @@ export default function App() {
     }
   };
 
+  // Staff Patient Search (Phase 07)
+  const handleStaffPatientSearch = async () => {
+    if (!staffToken || !searchQuery) return;
+    setReceptionMessage(null);
+    const isPhone = /^\d+$/.test(searchQuery);
+    const searchBody = isPhone ? { phone: searchQuery } : { name: searchQuery };
+    const res = await searchStaffPatients(searchBody, staffToken);
+    if (res.ok && res.data.patients) {
+      setSearchResults(res.data.patients);
+    } else {
+      setSearchResults([]);
+      setReceptionMessage(res.data?.message || 'No patients found');
+    }
+  };
+
+  // Staff Create Walk-In Patient (Phase 07)
+  const handleCreateWalkInPatient = async () => {
+    if (!staffToken || !newPatientForm.fullName || !newPatientForm.phone) return;
+    setReceptionMessage(null);
+    const res = await createWalkInPatient(newPatientForm, staffToken);
+    if (res.ok && res.data.patient) {
+      setSelectedStaffPatient(res.data.patient);
+      setNewPatientForm({ fullName: '', phone: '', gender: 'MALE' });
+      setReceptionMessage('Walk-in patient profile created successfully!');
+    } else {
+      setReceptionMessage(`Error: ${res.data?.message || res.error}`);
+    }
+  };
+
+  // Staff Register Walk-In (Phase 07)
+  const handleRegisterWalkIn = async () => {
+    if (!staffToken || !selectedStaffPatient || !receptionDoctorId) return;
+    setReceptionMessage(null);
+    const body = { doctorId: receptionDoctorId, patientId: selectedStaffPatient._id };
+    const res = await registerWalkIn(body, staffToken);
+    if (res.ok && res.data.queueEntry) {
+      setAllocatedTokenCard(res.data.queueEntry);
+      loadTodayStaffQueue();
+    } else {
+      setReceptionMessage(`Walk-in error: ${res.data?.message || res.error}`);
+    }
+  };
+
+  // Staff Check-In Online Appointment (Phase 07)
+  const handleStaffCheckInAppt = async (apptId) => {
+    if (!staffToken) return;
+    setReceptionMessage(null);
+    const res = await checkInAppointment(apptId, staffToken);
+    if (res.ok && res.data.queueEntry) {
+      setAllocatedTokenCard({
+        ...res.data.queueEntry,
+        patientName: res.data.appointment?.patientId?.fullName || 'Online Patient',
+      });
+      loadTodayStaffQueue();
+    } else {
+      setReceptionMessage(`Check-in error: ${res.data?.message || res.error}`);
+    }
+  };
+
+  // Load Today's Staff Queue (Phase 07)
+  const loadTodayStaffQueue = async () => {
+    if (!staffToken) return;
+    const res = await fetchTodayStaffQueue(staffToken, { doctorId: receptionDoctorId });
+    if (res.ok && res.data.queueEntries) {
+      setTodayQueue(res.data.queueEntries);
+    }
+  };
+
+  useEffect(() => {
+    if (viewTab === 'reception' && staffToken) {
+      loadTodayStaffQueue();
+    }
+  }, [viewTab, staffToken, receptionDoctorId]);
+
   return (
     <div className="container">
       <header className="header">
         <h1 className="title">QFlow Healthcare</h1>
-        <p className="subtitle">Phase 06 — Appointment Booking & Scheduling</p>
+        <p className="subtitle">Phase 07 — Walk-In Registration & Check-In Token Allocation</p>
         <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
           <button
             className={`btn ${viewTab === 'discover' ? 'btn-primary' : 'btn-secondary'}`}
@@ -215,24 +299,187 @@ export default function App() {
           >
             📅 My Appointments
           </button>
+          <button
+            className={`btn ${viewTab === 'reception' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setViewTab('reception')}
+          >
+            🏥 Staff Reception Desk
+          </button>
         </div>
       </header>
 
-      {/* Auth Token Drawer for Testing */}
-      <div style={{ background: '#090d16', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem' }}>
-        <span style={{ color: 'var(--text-muted)' }}>Patient JWT Token: </span>
-        <input
-          type="text"
-          className="filter-input"
-          placeholder="Paste Patient JWT Token here to test booking"
-          value={patientToken}
-          onChange={(e) => setPatientToken(e.target.value.trim())}
-          style={{ width: '60%', marginLeft: '0.5rem' }}
-        />
+      {/* Auth Token Drawer */}
+      <div style={{ background: '#090d16', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+        <div>
+          <span style={{ color: 'var(--text-muted)' }}>Patient JWT Token: </span>
+          <input
+            type="text"
+            className="filter-input"
+            placeholder="Paste Patient JWT Token"
+            value={patientToken}
+            onChange={(e) => setPatientToken(e.target.value.trim())}
+            style={{ width: '90%', marginTop: '0.25rem' }}
+          />
+        </div>
+        <div>
+          <span style={{ color: 'var(--text-muted)' }}>Staff/Admin JWT Token: </span>
+          <input
+            type="text"
+            className="filter-input"
+            placeholder="Paste Staff JWT Token"
+            value={staffToken}
+            onChange={(e) => setStaffToken(e.target.value.trim())}
+            style={{ width: '90%', marginTop: '0.25rem' }}
+          />
+        </div>
       </div>
 
-      {/* VIEW: Stage 3 Booking Confirmation Screen */}
-      {bookingSuccess ? (
+      {/* VIEW: Staff Reception Desk (Phase 07) */}
+      {viewTab === 'reception' ? (
+        <div className="card">
+          <h2>🏥 Reception Desk — Walk-In Registration & Check-In</h2>
+          {!staffToken ? (
+            <div className="empty-state">Please paste a valid Staff/Admin JWT token in the drawer above.</div>
+          ) : (
+            <div>
+              {receptionMessage && (
+                <div style={{ background: '#1c1917', border: '1px solid var(--primary)', padding: '0.75rem', borderRadius: '8px', color: 'var(--text-main)', marginBottom: '1rem' }}>
+                  {receptionMessage}
+                </div>
+              )}
+
+              {/* Token Allocation Confirmation Card */}
+              {allocatedTokenCard && (
+                <div style={{ background: '#064e3b', border: '1px solid var(--success-text)', padding: '1rem', borderRadius: '8px', marginBottom: '1.25rem', textAlign: 'center' }}>
+                  <h3 style={{ color: '#6ee7b7', margin: 0 }}>✓ QUEUE TOKEN ALLOCATED</h3>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#ffffff', margin: '0.5rem 0' }}>
+                    Token #{allocatedTokenCard.tokenNumber}
+                  </div>
+                  <div style={{ fontSize: '0.9rem', color: '#a7f3d0' }}>
+                    Patient: {allocatedTokenCard.patientName || 'Patient'} | Source: {allocatedTokenCard.source} | Date: {allocatedTokenCard.queueDate}
+                  </div>
+                  <button className="btn btn-secondary" style={{ marginTop: '0.75rem', fontSize: '0.8rem' }} onClick={() => setAllocatedTokenCard(null)}>
+                    Dismiss Token Card
+                  </button>
+                </div>
+              )}
+
+              {/* Doctor Selection */}
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label className="filter-label">Select Doctor for Queue Operations: </label>
+                <select
+                  className="filter-select"
+                  value={receptionDoctorId}
+                  onChange={(e) => setReceptionDoctorId(e.target.value)}
+                  style={{ marginLeft: '0.5rem', width: '300px' }}
+                >
+                  {doctors.map((d) => (
+                    <option key={d._id} value={d._id}>{d.fullName} ({d.specialty?.name || 'Doctor'})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
+                {/* Left Column: Patient Search & Walk-In Registration */}
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                  <h3 style={{ color: 'var(--primary)', marginBottom: '0.75rem' }}>1. Search or Create Patient</h3>
+                  
+                  <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                    <input
+                      type="text"
+                      className="filter-input"
+                      placeholder="Phone or Name search..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                    <button className="btn btn-primary" onClick={handleStaffPatientSearch}>Search</button>
+                  </div>
+
+                  {searchResults.length > 0 && (
+                    <div style={{ background: '#111827', padding: '0.5rem', borderRadius: '6px', marginBottom: '1rem', maxHeight: '150px', overflowY: 'auto' }}>
+                      <strong style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Search Results:</strong>
+                      {searchResults.map((p) => (
+                        <div
+                          key={p._id}
+                          style={{ padding: '0.4rem', borderBottom: '1px solid #1f2937', cursor: 'pointer', background: selectedStaffPatient?._id === p._id ? '#1e293b' : 'transparent' }}
+                          onClick={() => setSelectedStaffPatient(p)}
+                        >
+                          {p.fullName} ({p.phone}) — {p.gender}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Create Walk-In Patient Sub-Form */}
+                  <div style={{ borderTop: '1px solid #1f2937', paddingTop: '0.75rem', marginTop: '0.75rem' }}>
+                    <h4 style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Create New Walk-In Patient Profile:</h4>
+                    <input
+                      type="text"
+                      className="filter-input"
+                      placeholder="Full Name"
+                      value={newPatientForm.fullName}
+                      onChange={(e) => setNewPatientForm({ ...newPatientForm, fullName: e.target.value })}
+                      style={{ width: '100%', marginBottom: '0.4rem' }}
+                    />
+                    <input
+                      type="text"
+                      className="filter-input"
+                      placeholder="Phone Number"
+                      value={newPatientForm.phone}
+                      onChange={(e) => setNewPatientForm({ ...newPatientForm, phone: e.target.value })}
+                      style={{ width: '100%', marginBottom: '0.4rem' }}
+                    />
+                    <button className="btn btn-secondary" style={{ width: '100%', fontSize: '0.8rem' }} onClick={handleCreateWalkInPatient}>
+                      + Create Patient Profile
+                    </button>
+                  </div>
+
+                  {/* Selected Patient CTA */}
+                  {selectedStaffPatient && (
+                    <div style={{ marginTop: '1rem', background: '#1e293b', padding: '0.75rem', borderRadius: '6px' }}>
+                      <strong>Selected Patient:</strong> {selectedStaffPatient.fullName} ({selectedStaffPatient.phone})
+                      <button
+                        className="btn btn-primary"
+                        style={{ width: '100%', marginTop: '0.5rem' }}
+                        onClick={handleRegisterWalkIn}
+                      >
+                        REGISTER WALK-IN (ALLOCATE TOKEN)
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right Column: Today's Live Queue List */}
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                  <h3 style={{ color: 'var(--primary)', marginBottom: '0.75rem' }}>2. Today's Operational Queue</h3>
+                  {todayQueue.length === 0 ? (
+                    <div className="empty-state">No queue entries created yet for today.</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      {todayQueue.map((q) => (
+                        <div key={q._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1e293b', padding: '0.6rem', borderRadius: '6px' }}>
+                          <div>
+                            <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#6ee7b7', marginRight: '0.5rem' }}>
+                              #{q.tokenNumber}
+                            </span>
+                            <span>{q.patientId?.fullName || 'Patient'}</span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '0.5rem' }}>
+                              [{q.source}]
+                            </span>
+                          </div>
+                          <span className="status-badge status-connected">{q.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : bookingSuccess ? (
+        /* VIEW: Stage 3 Booking Confirmation Screen */
         <div className="card">
           <h2 style={{ color: 'var(--success-text)', marginBottom: '0.5rem' }}>✓ Appointment Booked Successfully!</h2>
           <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>Your online appointment has been confirmed in `BOOKED` status.</p>

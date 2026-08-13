@@ -58,7 +58,7 @@ const patientSchema = new mongoose.Schema(
 );
 
 // Indexes
-patientSchema.index({ phone: 1 });
+patientSchema.index({ phone: 1 }, { unique: true, name: 'unique_patient_phone' });
 patientSchema.index({ userId: 1 });
 patientSchema.index({ location: '2dsphere' });
 

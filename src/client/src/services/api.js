@@ -140,3 +140,68 @@ export const checkInAppointment = async (id, token) => {
     return { ok: false, status: 0, error: error.message };
   }
 };
+
+// Staff Queue Operations (Phase 07)
+export const searchStaffPatients = async (searchData, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/queue/patients/search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(searchData),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const createWalkInPatient = async (patientData, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/queue/patients`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(patientData),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const registerWalkIn = async (walkInData, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/queue/walk-in`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(walkInData),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchTodayStaffQueue = async (token, params = {}) => {
+  try {
+    const query = new URLSearchParams(params).toString();
+    const response = await fetch(`${API_BASE_URL}/staff/queue/today?${query}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
