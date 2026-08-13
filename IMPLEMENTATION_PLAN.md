@@ -124,8 +124,8 @@ Implemented:
 Deliverable:
 Core operational hybrid queue engine completed, audited, tested (100% pass across 20 scenarios & regression), and committed (`f24ce81`).
 
-### Phase 09 — Patient Live Queue Experience (DESIGN SPECIFIED)
-Design & implement patient-facing live queue tracking:
+### Phase 09 — Patient Live Queue Experience (COMPLETE)
+Implemented patient-facing live queue tracking:
 - patient-safe live queue snapshot (`GET /api/patient/queue/live`)
 - server-authoritative HYBRID queue position calculation
 - current serving token & serving state (`CALLED` / `IN_CONSULTATION` / `IDLE`)
@@ -136,19 +136,19 @@ Design & implement patient-facing live queue tracking:
 - Detailed Specification: `docs/PHASE_09_LIVE_QUEUE_DESIGN.md`
 
 Deliverable:
-Patient can safely monitor real-time queue progress from personal device.
+Patient live queue tracking completed, audited, tested (100% pass across 8 core tests & regression), and committed (`3760414`).
 
-### Phase 10 — Patient Queue Tracking
-- token screen
-- current token
-- waiting count
-- estimated wait
-- expected consultation window
-- recommended arrival
-- polling-based refresh
+### Phase 10 — Public Queue Display, Verified Ratings & Notifications (DESIGN SPECIFIED)
+Design & implement public display, ratings & notifications:
+- public clinic queue display board (`GET /api/public/queue/display`)
+- verified patient ratings & doctor reviews (`POST /api/patient/ratings`)
+- atomic doctor rating recalculation
+- database-backed in-app queue notifications (`Notification` model)
+- React Public Display, Rating Modal & Notification Bell components
+- Detailed Specification: `docs/PHASE_10_DESIGN.md`
 
 Deliverable:
-Patient can leave the physical queue area and track progress.
+Anonymous public display board, verified ratings system, and in-app notifications design specified.
 
 ### Phase 11 — Ratings, History & Analytics
 - verified rating

@@ -22,6 +22,11 @@ import {
   resumeQueue,
   cancelQueueEntry,
   getPatientLiveQueue,
+  fetchPublicQueueDisplay,
+  submitPatientRating,
+  fetchDoctorRatings,
+  fetchPatientNotifications,
+  markNotificationRead,
 } from './services/api';
 import './App.css';
 
@@ -501,6 +506,90 @@ export default function App() {
     }
   }, [viewTab, patientToken]);
 
+  // Phase 10 Public Display State
+  const [publicClinicId, setPublicClinicId] = useState('');
+  const [publicDoctorId, setPublicDoctorId] = useState('');
+  const [publicDisplayData, setPublicDisplayData] = useState(null);
+  const [publicDisplayLoading, setPublicDisplayLoading] = useState(false);
+  const [publicDisplayError, setPublicDisplayError] = useState(null);
+  const [publicLastUpdated, setPublicLastUpdated] = useState(null);
+
+  const loadPublicQueueDisplay = async () => {
+    if (!publicClinicId) return;
+    setPublicDisplayLoading(true);
+    setPublicDisplayError(null);
+    const res = await fetchPublicQueueDisplay(publicClinicId, publicDoctorId || null);
+    setPublicDisplayLoading(false);
+    if (res.ok && res.data?.success) {
+      setPublicDisplayData(res.data);
+      setPublicLastUpdated(new Date().toLocaleTimeString());
+    } else {
+      setPublicDisplayError(res.data?.message || res.error || 'Failed to load public queue display');
+    }
+  };
+
+  useEffect(() => {
+    if (viewTab === 'public_display' && publicClinicId) {
+      loadPublicQueueDisplay();
+
+      let intervalId = setInterval(() => {
+        loadPublicQueueDisplay();
+      }, 10000);
+
+      return () => clearInterval(intervalId);
+    }
+  }, [viewTab, publicClinicId, publicDoctorId]);
+
+  // Phase 10 Rating Submission State
+  const [ratingModalEntry, setRatingModalEntry] = useState(null);
+  const [ratingScore, setRatingScore] = useState(5);
+  const [ratingText, setRatingText] = useState('');
+  const [ratingMsg, setRatingMsg] = useState(null);
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+
+  const handleRatingSubmit = async (e) => {
+    e.preventDefault();
+    if (!patientToken || !ratingModalEntry) return;
+    setRatingSubmitting(true);
+    setRatingMsg(null);
+    const res = await submitPatientRating(ratingModalEntry._id || ratingModalEntry.queueEntryId, ratingScore, ratingText, patientToken);
+    setRatingSubmitting(false);
+    if (res.ok) {
+      setRatingMsg('Rating submitted successfully! Thank you.');
+      setTimeout(() => setRatingModalEntry(null), 1500);
+    } else {
+      setRatingMsg(`Error: ${res.data?.message || res.error}`);
+    }
+  };
+
+  // Phase 10 Notifications State
+  const [patientNotifs, setPatientNotifs] = useState([]);
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
+  const [showNotifDrawer, setShowNotifDrawer] = useState(false);
+
+  const loadPatientNotifs = async () => {
+    if (!patientToken) return;
+    const res = await fetchPatientNotifications(patientToken);
+    if (res.ok && res.data?.success) {
+      setPatientNotifs(res.data.notifications || []);
+      setUnreadNotifCount(res.data.unreadCount || 0);
+    }
+  };
+
+  const handleMarkNotifRead = async (id) => {
+    if (!patientToken) return;
+    const res = await markNotificationRead(id, patientToken);
+    if (res.ok) {
+      loadPatientNotifs();
+    }
+  };
+
+  useEffect(() => {
+    if (patientToken) {
+      loadPatientNotifs();
+    }
+  }, [patientToken]);
+
   return (
     <div className="container">
       <header className="header">
@@ -524,6 +613,12 @@ export default function App() {
             onClick={() => setViewTab('live_queue')}
           >
             📱 Patient Live Queue
+          </button>
+          <button
+            className={`btn ${viewTab === 'public_display' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setViewTab('public_display')}
+          >
+            📺 Public Display
           </button>
           <button
             className={`btn ${viewTab === 'reception' ? 'btn-primary' : 'btn-secondary'}`}
@@ -1068,6 +1163,80 @@ export default function App() {
               </div>
             </div>
           )}
+        </div>
+      ) : viewTab === 'public_display' ? (
+        /* VIEW: Public Queue Display Board (Phase 10 TV Display) */
+        <div className="card" style={{ background: '#090d16', border: '1px solid #1e293b' }}>
+          <h2 style={{ textAlign: 'center', color: '#38bdf8', marginBottom: '1rem' }}>📺 Clinic TV Queue Display Board</h2>
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.5rem', justifyContent: 'center' }}>
+            <input
+              type="text"
+              placeholder="Paste Clinic ID (e.g. 66bc...)"
+              value={publicClinicId}
+              onChange={(e) => setPublicClinicId(e.target.value.trim())}
+              style={{ width: '280px', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid #334155', background: '#0f172a', color: '#fff' }}
+            />
+            <input
+              type="text"
+              placeholder="Doctor ID (Optional)"
+              value={publicDoctorId}
+              onChange={(e) => setPublicDoctorId(e.target.value.trim())}
+              style={{ width: '220px', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid #334155', background: '#0f172a', color: '#fff' }}
+            />
+            <button className="btn btn-primary" onClick={loadPublicQueueDisplay}>📺 Load Display</button>
+          </div>
+
+          {!publicClinicId ? (
+            <div className="empty-state">Enter a valid Clinic ID above to load the TV wall display monitor.</div>
+          ) : publicDisplayLoading && !publicDisplayData ? (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <div className="spinner" style={{ margin: '0 auto 1rem' }}></div>
+              <p style={{ color: 'var(--text-muted)' }}>Loading TV display feed...</p>
+            </div>
+          ) : publicDisplayError ? (
+            <div style={{ color: '#ef4444', textAlign: 'center', padding: '1rem' }}>⚠️ {publicDisplayError}</div>
+          ) : publicDisplayData ? (
+            <div style={{ padding: '1rem' }}>
+              {publicDisplayData.doctor?.isQueuePaused && (
+                <div style={{ background: '#7c2d12', border: '2px solid #ea580c', padding: '1rem', borderRadius: '8px', color: '#ffedd5', textAlign: 'center', marginBottom: '1.5rem', fontWeight: 'bold', fontSize: '1.2rem' }}>
+                  ⏸️ QUEUE PAUSED: {publicDisplayData.doctor.queuePauseReason || 'Queue temporarily paused'}
+                </div>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', textAlign: 'center' }}>
+                <div style={{ background: '#0f172a', border: '2px solid #38bdf8', borderRadius: '12px', padding: '1.5rem' }}>
+                  <div style={{ fontSize: '1rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' }}>Now Serving Token</div>
+                  <div style={{ fontSize: '4rem', fontWeight: 'bold', color: '#38bdf8', margin: '0.5rem 0' }}>
+                    {publicDisplayData.display.currentServingToken ? `#${publicDisplayData.display.currentServingToken}` : '--'}
+                  </div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: publicDisplayData.display.servingState === 'IN_CONSULTATION' ? '#4ade80' : '#facc15' }}>
+                    {publicDisplayData.display.servingState}
+                  </div>
+                </div>
+
+                <div style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: '12px', padding: '1.5rem' }}>
+                  <div style={{ fontSize: '1rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' }}>Next Waiting Tokens</div>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'center', margin: '1rem 0' }}>
+                    {publicDisplayData.display.nextWaitingTokens && publicDisplayData.display.nextWaitingTokens.length > 0 ? (
+                      publicDisplayData.display.nextWaitingTokens.map((tk) => (
+                        <span key={tk} style={{ background: '#1e293b', border: '1px solid #475569', color: '#f8fafc', padding: '0.4rem 0.8rem', borderRadius: '6px', fontSize: '1.2rem', fontWeight: 'bold' }}>
+                          #{tk}
+                        </span>
+                      ))
+                    ) : (
+                      <span style={{ color: '#64748b' }}>No waiting patients</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '0.9rem', color: '#94a3b8' }}>Total Waiting: {publicDisplayData.display.totalWaitingCount}</div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: '1.5rem', borderTop: '1px solid #334155', paddingTop: '1rem', display: 'flex', justifyContent: 'space-between', color: '#94a3b8', fontSize: '0.85rem' }}>
+                <div><strong>Clinic:</strong> {publicDisplayData.clinicName} | <strong>Doctor:</strong> {publicDisplayData.doctor?.fullName}</div>
+                <div>Live Feed | Updated: {publicLastUpdated || 'Just now'}</div>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : (
         /* VIEW: Patient Discovery View */

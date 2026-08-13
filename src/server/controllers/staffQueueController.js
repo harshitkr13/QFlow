@@ -5,6 +5,7 @@ import { QueueHistory } from '../models/QueueHistory.js';
 import { Patient } from '../models/Patient.js';
 import { Doctor } from '../models/Doctor.js';
 import { Appointment } from '../models/Appointment.js';
+import { Notification } from '../models/Notification.js';
 
 /**
  * Helper: Format Date string to 'YYYY-MM-DD' in Asia/Kolkata (IST)
@@ -17,6 +18,24 @@ const getFormattedDateIST = (dateObj = new Date()) => {
     day: '2-digit',
   });
   return formatter.format(dateObj); // Returns 'YYYY-MM-DD'
+};
+
+/**
+ * Helper: Safely dispatch in-app notification to patient
+ */
+const dispatchPatientNotification = async (patientId, queueEntryId, type, title, message) => {
+  try {
+    if (!patientId) return;
+    await Notification.create({
+      patientId,
+      queueEntryId: queueEntryId || null,
+      type,
+      title,
+      message,
+    }).catch(() => {});
+  } catch (err) {
+    // Non-blocking notification dispatch
+  }
 };
 
 /**
@@ -493,6 +512,15 @@ export const callNextPatient = async (req, res, next) => {
       reason: 'Called next patient to consultation room',
       timestamp: new Date(),
     });
+
+    // Phase 10 Notification Dispatch
+    await dispatchPatientNotification(
+      queueEntry.patientId?._id || queueEntry.patientId,
+      queueEntry._id,
+      'PATIENT_CALLED',
+      'It is your turn!',
+      `Token #${queueEntry.tokenNumber} has been called for Dr. ${doctor.fullName}. Please proceed to the consultation room.`
+    );
 
     return res.status(200).json({
       success: true,
@@ -987,6 +1015,18 @@ export const pauseQueue = async (req, res, next) => {
       reason: reason || 'Doctor queue paused',
       timestamp: new Date(),
     });
+
+    // Notify waiting patients
+    const waitingEntriesToNotify = await QueueEntry.find({ doctorId: doctor._id, queueDate, status: 'WAITING' });
+    for (const we of waitingEntriesToNotify) {
+      await dispatchPatientNotification(
+        we.patientId,
+        we._id,
+        'QUEUE_PAUSED',
+        'Queue Paused',
+        `Doctor ${doctor.fullName}'s queue is temporarily paused: ${doctor.queuePauseReason}`
+      );
+    }
 
     return res.status(200).json({
       success: true,

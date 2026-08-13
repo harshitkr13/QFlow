@@ -159,6 +159,74 @@ export const getPatientLiveQueue = async (token, appointmentId = null) => {
   }
 };
 
+// Phase 10 APIs (Public Display, Ratings & Notifications)
+export const fetchPublicQueueDisplay = async (clinicId, doctorId = null) => {
+  try {
+    let url = `${API_BASE_URL}/public/queue/display?clinicId=${encodeURIComponent(clinicId)}`;
+    if (doctorId) {
+      url += `&doctorId=${encodeURIComponent(doctorId)}`;
+    }
+    const response = await fetch(url);
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const submitPatientRating = async (queueEntryId, rating, reviewText, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/patient/ratings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ queueEntryId, rating, reviewText }),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchDoctorRatings = async (doctorId) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/doctors/${doctorId}/ratings`);
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchPatientNotifications = async (token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/patient/notifications`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const markNotificationRead = async (notificationId, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/patient/notifications/${notificationId}/read`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
 // Staff Queue Operations (Phase 07)
 export const searchStaffPatients = async (searchData, token) => {
   try {

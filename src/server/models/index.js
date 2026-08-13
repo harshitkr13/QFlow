@@ -10,3 +10,4 @@ export { default as QueueCounter } from './QueueCounter.js';
 export { default as DoctorSchedule } from './DoctorSchedule.js';
 export { default as QueueHistory } from './QueueHistory.js';
 export { default as Rating } from './Rating.js';
+export { default as Notification } from './Notification.js';
