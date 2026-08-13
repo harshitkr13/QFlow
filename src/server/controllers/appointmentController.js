@@ -194,8 +194,9 @@ export const createAppointment = async (req, res, next) => {
     }
 
     // Verify Patient profile exists for user
-    let patient = await Patient.findOne({ userId: req.user._id });
-    if (!patient) {
+    const userId = req.user._id || req.user.id;
+    let patient = await Patient.findOne({ userId });
+    if (!patient && req.user.patientId) {
       patient = await Patient.findOne({ _id: req.user.patientId });
     }
     if (!patient) {
@@ -252,8 +253,9 @@ export const createAppointment = async (req, res, next) => {
  */
 export const getMyAppointments = async (req, res, next) => {
   try {
-    let patient = await Patient.findOne({ userId: req.user._id });
-    if (!patient) {
+    const userId = req.user._id || req.user.id;
+    let patient = await Patient.findOne({ userId });
+    if (!patient && req.user.patientId) {
       patient = await Patient.findOne({ _id: req.user.patientId });
     }
     if (!patient) {
@@ -300,13 +302,14 @@ export const getAppointmentById = async (req, res, next) => {
     }
 
     // Role-based Access Enforcement
+    const userId = req.user._id || req.user.id;
     if (req.user.role === 'PATIENT') {
-      const patient = await Patient.findOne({ userId: req.user._id });
+      const patient = await Patient.findOne({ userId });
       if (!patient || !appointment.patientId._id.equals(patient._id)) {
         return res.status(403).json({ success: false, message: 'Unauthorized to view this appointment' });
       }
     } else if (req.user.role === 'DOCTOR') {
-      const doctor = await Doctor.findOne({ userId: req.user._id });
+      const doctor = await Doctor.findOne({ userId });
       if (!doctor || !appointment.doctorId._id.equals(doctor._id)) {
         return res.status(403).json({ success: false, message: 'Unauthorized to view this appointment' });
       }
@@ -422,11 +425,13 @@ export const cancelAppointment = async (req, res, next) => {
       if (!patient && req.user.patientId) {
         patient = await Patient.findOne({ _id: req.user.patientId });
       }
-      if (!patient || !appointment.patientId.equals(patient._id)) {
+      const apptPatientId = (appointment.patientId._id || appointment.patientId).toString();
+      if (!patient || apptPatientId !== patient._id.toString()) {
         return res.status(403).json({ success: false, message: 'Unauthorized to cancel this appointment' });
       }
     } else if (req.user.role === 'STAFF') {
-      if (!req.user.staffClinicId || !appointment.clinicId.equals(req.user.staffClinicId)) {
+      const apptClinicId = (appointment.clinicId._id || appointment.clinicId).toString();
+      if (!req.user.staffClinicId || apptClinicId !== req.user.staffClinicId.toString()) {
         return res.status(403).json({ success: false, message: 'Staff cannot cancel appointments outside assigned clinic' });
       }
     }
@@ -534,6 +539,11 @@ export const checkInAppointment = async (req, res, next) => {
 
     const tokenNumber = counter.lastTokenNumber;
 
+    const [slotHours, slotMins] = appointment.timeSlot.startTime.split(':').map(Number);
+    const slotTotalMinutes = slotHours * 60 + slotMins;
+    const currentTotalMinutes = currentMin;
+    const effectiveSlotMinutes = currentTotalMinutes > slotTotalMinutes ? currentTotalMinutes : slotTotalMinutes;
+
     // Start MongoDB Session Transaction for QueueEntry + QueueHistory
     const session = await mongoose.startSession();
     try {
@@ -550,6 +560,8 @@ export const checkInAppointment = async (req, res, next) => {
             tokenNumber,
             source: 'ONLINE',
             priority: 'NORMAL',
+            priorityWeight: 1,
+            effectiveSlotMinutes,
             status: 'WAITING',
             joinedAt: new Date(),
           },

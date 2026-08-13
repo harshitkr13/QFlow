@@ -207,7 +207,7 @@ export const runPhase07Validation = async () => {
     // Duplicate Phone Prevention Test (409 Conflict)
     const dupPhoneRes = await mockCall(createWalkInPatient, {
       user: { _id: staffUser1._id, id: staffUser1._id, role: 'STAFF', staffClinicId: clinic1._id },
-      body: { fullName: 'Duplicate Phone', phone: uniquePhone },
+      body: { fullName: 'Duplicate Phone', phone: uniquePhone, gender: 'FEMALE' },
     });
     if (dupPhoneRes.status !== 409) {
       throw new Error('Test 4 Failed: Duplicate phone registration did not return 409 Conflict');

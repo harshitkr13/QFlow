@@ -49,6 +49,27 @@ const queueEntrySchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    effectiveSlotMinutes: {
+      type: Number,
+      required: [true, 'Effective slot minutes is required'],
+      default: 0,
+    },
+    priorityWeight: {
+      type: Number,
+      default: 1, // 0 for URGENT, 1 for NORMAL
+    },
+    skippedAt: {
+      type: Date,
+      default: null,
+    },
+    rejoinedAt: {
+      type: Date,
+      default: null,
+    },
+    rejoinCount: {
+      type: Number,
+      default: 0,
+    },
     calledAt: {
       type: Date,
       default: null,
@@ -91,6 +112,10 @@ queueEntrySchema.index(
     },
     name: 'unique_appointment_queue_entry_idx',
   }
+);
+queueEntrySchema.index(
+  { doctorId: 1, queueDate: 1, status: 1, priorityWeight: 1, effectiveSlotMinutes: 1, joinedAt: 1, tokenNumber: 1 },
+  { name: 'hybrid_queue_ordering_idx' }
 );
 queueEntrySchema.index({ doctorId: 1, queueDate: 1, status: 1, joinedAt: 1 });
 queueEntrySchema.index({ patientId: 1, queueDate: -1 });

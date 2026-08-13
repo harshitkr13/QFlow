@@ -85,7 +85,7 @@ Stage 1 & Stage 2 patient discovery with operational blindness.
 Deliverable:
 Complete online appointment booking and scheduling system.
 
-### Phase 07 — Walk-in Registration & Check-In Entry (DESIGN SPECIFIED)
+### Phase 07 — Walk-in Registration & Check-In Entry (COMPLETE)
 - receptionist patient search/create
 - walk-in registration
 - atomic token generation via `QueueCounter`
@@ -94,9 +94,9 @@ Complete online appointment booking and scheduling system.
 - Detailed Specification: `docs/PHASE_07_QUEUE_ENTRY_DESIGN.md`
 
 Deliverable:
-Operational queue entry registration and token allocation design.
+Operational queue entry registration and token allocation completed and committed.
 
-### Phase 08 — Queue Engine
+### Phase 08 — Queue Engine (DESIGN SPECIFIED)
 Implement state transitions:
 - `BOOKED` (Appointment created)
 - `CHECKED_IN` / `WAITING` (QueueEntry + Token allocated)
@@ -109,14 +109,17 @@ Implement state transitions:
 
 Implement:
 - deterministic HYBRID queue ordering algorithm
-- call next
-- skip
-- complete
-- queue pause/resume
-- atomic token generation via QueueCounter
+- atomic call next with conditional claim
+- start consultation
+- complete consultation
+- skip patient
+- no-show patient
+- rejoin skipped patient
+- doctor queue pause/resume
+- Detailed Specification: `docs/PHASE_08_QUEUE_ENGINE_DESIGN.md`
 
 Deliverable:
-Core operational hybrid queue engine works.
+Core operational hybrid queue engine design specified.
 
 ### Phase 09 — Doctor & Staff Dashboards
 Staff:

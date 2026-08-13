@@ -12,6 +12,15 @@ import {
   registerWalkIn,
   fetchTodayStaffQueue,
   checkInAppointment,
+  callNextPatient,
+  startConsultation,
+  completeConsultation,
+  skipPatient,
+  markNoShow,
+  rejoinPatient,
+  pauseQueue,
+  resumeQueue,
+  cancelQueueEntry,
 } from './services/api';
 import './App.css';
 
@@ -56,7 +65,7 @@ export default function App() {
   const [myAppointments, setMyAppointments] = useState([]);
   const [viewTab, setViewTab] = useState('discover'); // 'discover' | 'my_appointments' | 'reception'
 
-  // Reception Dashboard State (Phase 07)
+  // Reception Dashboard State (Phase 07 & 08)
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [selectedStaffPatient, setSelectedStaffPatient] = useState(null);
@@ -64,6 +73,11 @@ export default function App() {
   const [receptionDoctorId, setReceptionDoctorId] = useState('');
   const [allocatedTokenCard, setAllocatedTokenCard] = useState(null);
   const [todayQueue, setTodayQueue] = useState([]);
+  const [waitingEntries, setWaitingEntries] = useState([]);
+  const [activeEntries, setActiveEntries] = useState([]);
+  const [skippedEntries, setSkippedEntries] = useState([]);
+  const [doctorQueueStatus, setDoctorQueueStatus] = useState({ isQueuePaused: false, queuePausedAt: null, queuePauseReason: null });
+  const [opLoading, setOpLoading] = useState(false);
   const [receptionMessage, setReceptionMessage] = useState(null);
 
   // Load Specialties & Doctors
@@ -266,12 +280,157 @@ export default function App() {
     }
   };
 
-  // Load Today's Staff Queue (Phase 07)
+  // Load Today's Staff Queue (Phase 07 & 08)
   const loadTodayStaffQueue = async () => {
     if (!staffToken) return;
     const res = await fetchTodayStaffQueue(staffToken, { doctorId: receptionDoctorId });
-    if (res.ok && res.data.queueEntries) {
-      setTodayQueue(res.data.queueEntries);
+    if (res.ok && res.data) {
+      setTodayQueue(res.data.queueEntries || []);
+      setWaitingEntries(res.data.waitingEntries || []);
+      setActiveEntries(res.data.activeEntries || []);
+      setSkippedEntries(res.data.skippedEntries || []);
+      if (res.data.doctorQueueStatus) {
+        setDoctorQueueStatus(res.data.doctorQueueStatus);
+      }
+    }
+  };
+
+  // Phase 08 Queue Engine Handlers
+  const handleCallNextPatient = async () => {
+    if (!staffToken || !receptionDoctorId) return;
+    setOpLoading(true);
+    setReceptionMessage(null);
+    const res = await callNextPatient(receptionDoctorId, staffToken);
+    setOpLoading(false);
+    if (res.ok && res.data.queueEntry) {
+      setReceptionMessage(`Called Patient Token #${res.data.queueEntry.tokenNumber} (${res.data.queueEntry.patientId?.fullName || 'Patient'})`);
+      loadTodayStaffQueue();
+    } else {
+      setReceptionMessage(`Call Next error: ${res.data?.message || res.error}`);
+    }
+  };
+
+  const handleStartConsultation = async (id) => {
+    if (!staffToken) return;
+    setOpLoading(true);
+    setReceptionMessage(null);
+    const res = await startConsultation(id, staffToken);
+    setOpLoading(false);
+    if (res.ok) {
+      setReceptionMessage('Consultation started.');
+      loadTodayStaffQueue();
+    } else {
+      setReceptionMessage(`Start Consultation error: ${res.data?.message || res.error}`);
+    }
+  };
+
+  const handleCompleteConsultation = async (id) => {
+    if (!staffToken) return;
+    setOpLoading(true);
+    setReceptionMessage(null);
+    const res = await completeConsultation(id, staffToken);
+    setOpLoading(false);
+    if (res.ok) {
+      setReceptionMessage('Consultation completed successfully!');
+      loadTodayStaffQueue();
+    } else {
+      setReceptionMessage(`Complete error: ${res.data?.message || res.error}`);
+    }
+  };
+
+  const handleSkipPatient = async (id, currentStatus) => {
+    if (!staffToken) return;
+    let reason = 'Patient skipped by receptionist';
+    if (currentStatus === 'WAITING') {
+      const inputReason = prompt('Please enter operational reason for skipping WAITING patient:');
+      if (!inputReason || inputReason.trim() === '') return;
+      reason = inputReason.trim();
+    }
+    setOpLoading(true);
+    setReceptionMessage(null);
+    const res = await skipPatient(id, reason, staffToken);
+    setOpLoading(false);
+    if (res.ok) {
+      setReceptionMessage('Patient skipped.');
+      loadTodayStaffQueue();
+    } else {
+      setReceptionMessage(`Skip error: ${res.data?.message || res.error}`);
+    }
+  };
+
+  const handleMarkNoShow = async (id, currentStatus) => {
+    if (!staffToken) return;
+    let reason = 'Patient marked no-show';
+    if (currentStatus === 'WAITING') {
+      const inputReason = prompt('Please enter reason for marking WAITING patient as NO_SHOW:');
+      if (!inputReason || inputReason.trim() === '') return;
+      reason = inputReason.trim();
+    }
+    setOpLoading(true);
+    setReceptionMessage(null);
+    const res = await markNoShow(id, reason, staffToken);
+    setOpLoading(false);
+    if (res.ok) {
+      setReceptionMessage('Patient marked as no-show.');
+      loadTodayStaffQueue();
+    } else {
+      setReceptionMessage(`No-show error: ${res.data?.message || res.error}`);
+    }
+  };
+
+  const handleRejoinPatient = async (id) => {
+    if (!staffToken) return;
+    setOpLoading(true);
+    setReceptionMessage(null);
+    const res = await rejoinPatient(id, staffToken);
+    setOpLoading(false);
+    if (res.ok && res.data.queueEntry) {
+      setReceptionMessage(`Patient rejoined queue with new Token #${res.data.queueEntry.tokenNumber}`);
+      loadTodayStaffQueue();
+    } else {
+      setReceptionMessage(`Rejoin error: ${res.data?.message || res.error}`);
+    }
+  };
+
+  const handleTogglePauseQueue = async () => {
+    if (!staffToken || !receptionDoctorId) return;
+    setOpLoading(true);
+    setReceptionMessage(null);
+    if (doctorQueueStatus.isQueuePaused) {
+      const res = await resumeQueue(receptionDoctorId, staffToken);
+      setOpLoading(false);
+      if (res.ok) {
+        setReceptionMessage('Doctor queue resumed.');
+        loadTodayStaffQueue();
+      } else {
+        setReceptionMessage(`Resume error: ${res.data?.message || res.error}`);
+      }
+    } else {
+      const reason = prompt('Reason for pausing doctor queue:', 'Doctor on break / Emergency');
+      const res = await pauseQueue(receptionDoctorId, reason || 'Queue paused', staffToken);
+      setOpLoading(false);
+      if (res.ok) {
+        setReceptionMessage('Doctor queue paused.');
+        loadTodayStaffQueue();
+      } else {
+        setReceptionMessage(`Pause error: ${res.data?.message || res.error}`);
+      }
+    }
+  };
+
+  const handleCancelQueueEntry = async (id) => {
+    if (!staffToken) return;
+    const reason = prompt('Reason for cancelling queue entry:', 'Cancelled by receptionist');
+    if (!reason) return;
+    setOpLoading(true);
+    setReceptionMessage(null);
+    const res = await cancelQueueEntry(id, reason, staffToken);
+    setOpLoading(false);
+    if (res.ok) {
+      setReceptionMessage('Queue entry cancelled.');
+      loadTodayStaffQueue();
+    } else {
+      setReceptionMessage(`Cancel error: ${res.data?.message || res.error}`);
     }
   };
 
@@ -334,12 +493,12 @@ export default function App() {
         </div>
       </div>
 
-      {/* VIEW: Staff Reception Desk (Phase 07) */}
+      {/* VIEW: Staff Reception Desk (Phase 07 & 08) */}
       {viewTab === 'reception' ? (
         <div className="card">
-          <h2>🏥 Reception Desk — Walk-In Registration & Check-In</h2>
+          <h2>🏥 Reception Desk — Operational Queue Management</h2>
           {!staffToken ? (
-            <div className="empty-state">Please paste a valid Staff/Admin JWT token in the drawer above.</div>
+            <div className="empty-state">Please paste a valid Staff/Admin/Doctor JWT token in the drawer above.</div>
           ) : (
             <div>
               {receptionMessage && (
@@ -364,25 +523,105 @@ export default function App() {
                 </div>
               )}
 
-              {/* Doctor Selection */}
-              <div style={{ marginBottom: '1.25rem' }}>
-                <label className="filter-label">Select Doctor for Queue Operations: </label>
-                <select
-                  className="filter-select"
-                  value={receptionDoctorId}
-                  onChange={(e) => setReceptionDoctorId(e.target.value)}
-                  style={{ marginLeft: '0.5rem', width: '300px' }}
-                >
-                  {doctors.map((d) => (
-                    <option key={d._id} value={d._id}>{d.fullName} ({d.specialty?.name || 'Doctor'})</option>
-                  ))}
-                </select>
+              {/* Queue Controls Header & Doctor Selector */}
+              <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <label className="filter-label" style={{ fontWeight: 'bold' }}>Doctor: </label>
+                  <select
+                    className="filter-select"
+                    value={receptionDoctorId}
+                    onChange={(e) => setReceptionDoctorId(e.target.value)}
+                    style={{ width: '260px' }}
+                  >
+                    {doctors.map((d) => (
+                      <option key={d._id} value={d._id}>{d.fullName} ({d.specialty?.name || 'Doctor'})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                  <button
+                    className="btn btn-primary"
+                    style={{ padding: '0.75rem 1.5rem', fontSize: '1rem', fontWeight: 'bold', background: doctorQueueStatus.isQueuePaused || activeEntries.length > 0 ? '#4b5563' : 'var(--primary)' }}
+                    disabled={opLoading || doctorQueueStatus.isQueuePaused || activeEntries.length > 0}
+                    onClick={handleCallNextPatient}
+                  >
+                    📢 CALL NEXT PATIENT
+                  </button>
+
+                  <button
+                    className={`btn ${doctorQueueStatus.isQueuePaused ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ background: doctorQueueStatus.isQueuePaused ? '#dc2626' : undefined }}
+                    disabled={opLoading}
+                    onClick={handleTogglePauseQueue}
+                  >
+                    {doctorQueueStatus.isQueuePaused ? '▶ Resume Queue' : '⏸ Pause Queue'}
+                  </button>
+                </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
-                {/* Left Column: Patient Search & Walk-In Registration */}
+              {/* Queue Paused Warning Banner */}
+              {doctorQueueStatus.isQueuePaused && (
+                <div style={{ background: '#7f1d1d', border: '1px solid #ef4444', color: '#fca5a5', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1.25rem' }}>
+                  <strong>⏸ QUEUE IS CURRENTLY PAUSED TODAY:</strong> {doctorQueueStatus.queuePauseReason || 'No reason specified'}
+                </div>
+              )}
+
+              {/* Current Active Patient Card (CALLED / IN_CONSULTATION) */}
+              {activeEntries.length > 0 && (
+                <div style={{ background: '#1e1b4b', border: '2px solid #6366f1', padding: '1.25rem', borderRadius: '8px', marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <h3 style={{ color: '#a5b4fc', margin: 0 }}>🚨 CURRENT ACTIVE PATIENT IN ROOM</h3>
+                    <span className="status-badge" style={{ background: activeEntries[0].status === 'IN_CONSULTATION' ? '#059669' : '#d97706', color: '#fff', fontSize: '0.9rem', padding: '0.3rem 0.8rem' }}>
+                      {activeEntries[0].status}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontSize: '2rem', fontWeight: 'bold', color: '#ffffff' }}>
+                        Token #{activeEntries[0].tokenNumber}
+                      </div>
+                      <div style={{ fontSize: '1.1rem', color: '#c7d2fe', marginTop: '0.25rem' }}>
+                        {activeEntries[0].patientId?.fullName || 'Patient'} ({activeEntries[0].patientId?.phone || 'N/A'})
+                      </div>
+                      <div style={{ fontSize: '0.85rem', color: '#93c5fd', marginTop: '0.25rem' }}>
+                        Source: {activeEntries[0].source} | Slot: {activeEntries[0].appointmentId?.timeSlot ? `${activeEntries[0].appointmentId.timeSlot.startTime}-${activeEntries[0].appointmentId.timeSlot.endTime}` : 'Walk-In'}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      {activeEntries[0].status === 'CALLED' && (
+                        <>
+                          <button className="btn btn-primary" style={{ background: '#059669' }} disabled={opLoading} onClick={() => handleStartConsultation(activeEntries[0]._id)}>
+                            ▶ Start Consultation
+                          </button>
+                          <button className="btn btn-secondary" disabled={opLoading} onClick={() => handleSkipPatient(activeEntries[0]._id, 'CALLED')}>
+                            ⏩ Skip
+                          </button>
+                          <button className="btn btn-secondary" disabled={opLoading} onClick={() => handleMarkNoShow(activeEntries[0]._id, 'CALLED')}>
+                            🚫 No-Show
+                          </button>
+                          <button className="btn btn-secondary" disabled={opLoading} onClick={() => handleCancelQueueEntry(activeEntries[0]._id)}>
+                            ✕ Cancel
+                          </button>
+                        </>
+                      )}
+
+                      {activeEntries[0].status === 'IN_CONSULTATION' && (
+                        <button className="btn btn-primary" style={{ background: '#10b981', padding: '0.75rem 1.5rem', fontSize: '1rem' }} disabled={opLoading} onClick={() => handleCompleteConsultation(activeEntries[0]._id)}>
+                          ✓ COMPLETE CONSULTATION
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem', marginBottom: '1.25rem' }}>
+                {/* Left Column: Patient Search, Walk-In Creation & Check-In */}
                 <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                  <h3 style={{ color: 'var(--primary)', marginBottom: '0.75rem' }}>1. Search or Create Patient</h3>
+                  <h3 style={{ color: 'var(--primary)', marginBottom: '0.75rem' }}>1. Search & Check-In / Walk-In</h3>
                   
                   <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
                     <input
@@ -442,6 +681,7 @@ export default function App() {
                       <button
                         className="btn btn-primary"
                         style={{ width: '100%', marginTop: '0.5rem' }}
+                        disabled={opLoading}
                         onClick={handleRegisterWalkIn}
                       >
                         REGISTER WALK-IN (ALLOCATE TOKEN)
@@ -450,31 +690,69 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Right Column: Today's Live Queue List */}
+                {/* Right Column: HYBRID Ordered WAITING Queue Table */}
                 <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                  <h3 style={{ color: 'var(--primary)', marginBottom: '0.75rem' }}>2. Today's Operational Queue</h3>
-                  {todayQueue.length === 0 ? (
-                    <div className="empty-state">No queue entries created yet for today.</div>
+                  <h3 style={{ color: 'var(--primary)', marginBottom: '0.75rem' }}>2. Live Ordered WAITING Queue ({waitingEntries.length})</h3>
+                  {waitingEntries.length === 0 ? (
+                    <div className="empty-state">No patients currently waiting in queue.</div>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      {todayQueue.map((q) => (
-                        <div key={q._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1e293b', padding: '0.6rem', borderRadius: '6px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '350px', overflowY: 'auto' }}>
+                      {waitingEntries.map((q, idx) => (
+                        <div key={q._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1e293b', padding: '0.6rem 0.8rem', borderRadius: '6px' }}>
                           <div>
-                            <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#6ee7b7', marginRight: '0.5rem' }}>
+                            <span style={{ fontSize: '1rem', fontWeight: 'bold', color: '#6ee7b7', marginRight: '0.5rem' }}>
                               #{q.tokenNumber}
                             </span>
-                            <span>{q.patientId?.fullName || 'Patient'}</span>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '0.5rem' }}>
-                              [{q.source}]
-                            </span>
+                            <strong style={{ fontSize: '0.9rem' }}>{q.patientId?.fullName || 'Patient'}</strong>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                              Source: {q.source} | Eff: {Math.floor(q.effectiveSlotMinutes / 60).toString().padStart(2, '0')}:{(q.effectiveSlotMinutes % 60).toString().padStart(2, '0')}
+                            </div>
                           </div>
-                          <span className="status-badge status-connected">{q.status}</span>
+
+                          <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+                            <button className="btn btn-secondary" style={{ padding: '0.2rem 0.4rem', fontSize: '0.7rem' }} disabled={opLoading} onClick={() => handleSkipPatient(q._id, 'WAITING')}>
+                              Skip
+                            </button>
+                            <button className="btn btn-secondary" style={{ padding: '0.2rem 0.4rem', fontSize: '0.7rem' }} disabled={opLoading} onClick={() => handleMarkNoShow(q._id, 'WAITING')}>
+                              No-Show
+                            </button>
+                            <button className="btn btn-secondary" style={{ padding: '0.2rem 0.4rem', fontSize: '0.7rem' }} disabled={opLoading} onClick={() => handleCancelQueueEntry(q._id)}>
+                              Cancel
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
               </div>
+
+              {/* Bottom Section: SKIPPED Patients Section */}
+              {skippedEntries.length > 0 && (
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid #ca8a04', marginTop: '1rem' }}>
+                  <h3 style={{ color: '#fde047', marginBottom: '0.75rem' }}>⏩ Skipped Patients ({skippedEntries.length})</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.75rem' }}>
+                    {skippedEntries.map((s) => (
+                      <div key={s._id} style={{ background: '#1e293b', padding: '0.75rem', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <span style={{ fontWeight: 'bold', color: '#fde047' }}>Token #{s.tokenNumber}</span> — {s.patientId?.fullName || 'Patient'}
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                            Rejoins: {s.rejoinCount || 0} / 3 | Source: {s.source}
+                          </div>
+                        </div>
+                        <button
+                          className="btn btn-primary"
+                          style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: s.rejoinCount >= 3 ? '#6b7280' : '#d97706' }}
+                          disabled={opLoading || s.rejoinCount >= 3}
+                          onClick={() => handleRejoinPatient(s._id)}
+                        >
+                          {s.rejoinCount >= 3 ? 'Max Rejoined' : '↩ Rejoin'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

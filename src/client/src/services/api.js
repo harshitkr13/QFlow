@@ -205,3 +205,145 @@ export const fetchTodayStaffQueue = async (token, params = {}) => {
     return { ok: false, status: 0, error: error.message };
   }
 };
+
+// Phase 08 Queue Engine API Helpers
+export const callNextPatient = async (doctorId, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/queue/call-next`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ doctorId }),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const startConsultation = async (id, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/queue/${id}/start`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const completeConsultation = async (id, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/queue/${id}/complete`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const skipPatient = async (id, reason, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/queue/${id}/skip`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ reason }),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const markNoShow = async (id, reason, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/queue/${id}/no-show`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ reason }),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const rejoinPatient = async (id, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/queue/${id}/rejoin`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const pauseQueue = async (doctorId, reason, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/queue/pause`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ doctorId, reason }),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const resumeQueue = async (doctorId, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/queue/resume`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ doctorId }),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const cancelQueueEntry = async (id, reason, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/queue/${id}/cancel`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ reason }),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};

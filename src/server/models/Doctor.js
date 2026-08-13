@@ -72,6 +72,22 @@ const doctorSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    isQueuePaused: {
+      type: Boolean,
+      default: false,
+    },
+    queuePausedAt: {
+      type: Date,
+      default: null,
+    },
+    queuePauseReason: {
+      type: String,
+      default: null,
+    },
+    queuePausedDate: {
+      type: String, // 'YYYY-MM-DD'
+      default: null,
+    },
   },
   {
     timestamps: true,
