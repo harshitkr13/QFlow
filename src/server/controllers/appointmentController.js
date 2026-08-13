@@ -626,3 +626,161 @@ export const checkInAppointment = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * @desc    Get Patient Live Queue Snapshot (Read-Only, Privacy-Preserved)
+ * @route   GET /api/patient/queue/live
+ * @access  Private (PATIENT)
+ */
+export const getPatientLiveQueue = async (req, res, next) => {
+  try {
+    const userId = req.user._id || req.user.id;
+    let patient = await Patient.findOne({ userId });
+    if (!patient && req.user.patientId) {
+      patient = await Patient.findOne({ _id: req.user.patientId });
+    }
+    if (!patient) {
+      return res.status(404).json({ success: false, message: 'Patient profile not found' });
+    }
+
+    const todayIST = getFormattedDateIST();
+    const { appointmentId, queueEntryId } = req.query;
+
+    let filter = { patientId: patient._id, queueDate: todayIST };
+    if (appointmentId && mongoose.Types.ObjectId.isValid(appointmentId)) {
+      filter.appointmentId = appointmentId;
+    } else if (queueEntryId && mongoose.Types.ObjectId.isValid(queueEntryId)) {
+      filter._id = queueEntryId;
+    } else {
+      filter.status = { $in: ['WAITING', 'CALLED', 'IN_CONSULTATION', 'COMPLETED', 'SKIPPED', 'NO_SHOW'] };
+    }
+
+    const myEntry = await QueueEntry.findOne(filter)
+      .populate('doctorId', 'fullName photoUrl operationalStatus averageConsultationDurationMinutes isQueuePaused queuePausedAt queuePauseReason queuePausedDate clinicId')
+      .populate('clinicId', 'name address phone')
+      .sort({ createdAt: -1 });
+
+    if (!myEntry) {
+      return res.status(200).json({
+        success: true,
+        hasActiveEntry: false,
+        message: 'No active queue entry found for today',
+      });
+    }
+
+    const doctor = myEntry.doctorId;
+    const clinic = myEntry.clinicId;
+
+    // Doctor queue pause state
+    const isQueuePaused = Boolean(doctor && doctor.isQueuePaused && doctor.queuePausedDate === todayIST);
+    const queuePauseReason = isQueuePaused ? (doctor.queuePauseReason || 'Doctor queue paused') : null;
+
+    // Current Serving Token Logic
+    let currentServingToken = null;
+    let servingState = 'IDLE';
+
+    const activeServingEntry = await QueueEntry.findOne({
+      doctorId: myEntry.doctorId._id || myEntry.doctorId,
+      queueDate: todayIST,
+      status: { $in: ['CALLED', 'IN_CONSULTATION'] },
+    }).sort({ status: 1 }); // IN_CONSULTATION before CALLED
+
+    if (activeServingEntry) {
+      currentServingToken = activeServingEntry.tokenNumber;
+      servingState = activeServingEntry.status;
+    }
+
+    // Queue Position & People Ahead Calculation (HYBRID Algorithm)
+    let queuePosition = null;
+    let peopleAhead = 0;
+
+    if (myEntry.status === 'CALLED' || myEntry.status === 'IN_CONSULTATION') {
+      queuePosition = 0;
+      peopleAhead = 0;
+    } else if (myEntry.status === 'WAITING') {
+      const waitingEntries = await QueueEntry.find({
+        doctorId: myEntry.doctorId._id || myEntry.doctorId,
+        queueDate: todayIST,
+        status: 'WAITING',
+      }).sort({
+        priorityWeight: 1,
+        effectiveSlotMinutes: 1,
+        joinedAt: 1,
+        tokenNumber: 1,
+      });
+
+      const myIndex = waitingEntries.findIndex((e) => e._id.equals(myEntry._id));
+      if (myIndex !== -1) {
+        queuePosition = myIndex + 1;
+        peopleAhead = myIndex;
+      } else {
+        queuePosition = 1;
+        peopleAhead = 0;
+      }
+    } else {
+      // Terminal states (COMPLETED, SKIPPED, NO_SHOW, CANCELLED)
+      queuePosition = null;
+      peopleAhead = 0;
+    }
+
+    // Wait-Time Estimation Calculation
+    const avgDuration = doctor?.averageConsultationDurationMinutes || 15;
+    let estimatedWaitMinutes = 0;
+
+    if (myEntry.status === 'CALLED' || myEntry.status === 'IN_CONSULTATION') {
+      estimatedWaitMinutes = 0;
+    } else if (myEntry.status === 'WAITING') {
+      const baseWait = peopleAhead * avgDuration;
+      const activeRemainder = servingState === 'IN_CONSULTATION' ? Math.round(avgDuration * 0.5) : 0;
+      estimatedWaitMinutes = Math.max(0, Math.round(baseWait + activeRemainder));
+    } else {
+      estimatedWaitMinutes = 0;
+    }
+
+    return res.status(200).json({
+      success: true,
+      hasActiveEntry: true,
+      queue: {
+        queueEntryId: myEntry._id,
+        appointmentId: myEntry.appointmentId,
+        tokenNumber: myEntry.tokenNumber,
+        status: myEntry.status,
+        priority: myEntry.priority,
+        source: myEntry.source,
+        joinedAt: myEntry.joinedAt,
+        calledAt: myEntry.calledAt,
+        consultationStartedAt: myEntry.consultationStartedAt,
+        completedAt: myEntry.completedAt,
+        skippedAt: myEntry.skippedAt,
+        rejoinedAt: myEntry.rejoinedAt,
+        currentServingToken,
+        servingState,
+        queuePosition,
+        peopleAhead,
+        estimatedWaitMinutes,
+        isEstimated: true,
+        isQueuePaused,
+        queuePauseReason,
+        doctor: doctor
+          ? {
+              _id: doctor._id,
+              fullName: doctor.fullName,
+              photoUrl: doctor.photoUrl,
+              operationalStatus: doctor.operationalStatus,
+            }
+          : null,
+        clinic: clinic
+          ? {
+              _id: clinic._id,
+              name: clinic.name,
+              address: clinic.address,
+              phone: clinic.phone,
+            }
+          : null,
+        lastUpdated: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};

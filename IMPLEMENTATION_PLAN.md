@@ -96,8 +96,8 @@ Complete online appointment booking and scheduling system.
 Deliverable:
 Operational queue entry registration and token allocation completed and committed.
 
-### Phase 08 — Queue Engine (DESIGN SPECIFIED)
-Implement state transitions:
+### Phase 08 — Queue Engine (COMPLETE)
+Implemented state transitions & core engine:
 - `BOOKED` (Appointment created)
 - `CHECKED_IN` / `WAITING` (QueueEntry + Token allocated)
 - `CALLED`
@@ -107,36 +107,36 @@ Implement state transitions:
 - `NO_SHOW`
 - `CANCELLED`
 
-Implement:
+Implemented:
 - deterministic HYBRID queue ordering algorithm
 - atomic call next with conditional claim
 - start consultation
 - complete consultation
 - skip patient
 - no-show patient
-- rejoin skipped patient
-- doctor queue pause/resume
+- rejoin skipped patient with new token allocation
+- date-scoped doctor queue pause/resume
+- compound index `hybrid_queue_ordering_idx`
+- append-only `QueueHistory` audit logging
+- staff reception desk UI integration
 - Detailed Specification: `docs/PHASE_08_QUEUE_ENGINE_DESIGN.md`
 
 Deliverable:
-Core operational hybrid queue engine design specified.
+Core operational hybrid queue engine completed, audited, tested (100% pass across 20 scenarios & regression), and committed (`f24ce81`).
 
-### Phase 09 — Doctor & Staff Dashboards
-Staff:
-- queue overview
-- add walk-in
-- call next
-- skip
-- pause/resume
-- doctor availability
-
-Doctor:
-- current patient
-- next patient
-- start/complete consultation
+### Phase 09 — Patient Live Queue Experience (DESIGN SPECIFIED)
+Design & implement patient-facing live queue tracking:
+- patient-safe live queue snapshot (`GET /api/patient/queue/live`)
+- server-authoritative HYBRID queue position calculation
+- current serving token & serving state (`CALLED` / `IN_CONSULTATION` / `IDLE`)
+- privacy boundary enforcement (zero data leakage of other patients)
+- deterministic wait-time estimation based on `averageConsultationDurationMinutes`
+- resilient 10-second polling transport with background tab throttling
+- React Patient Live Queue UI component & integration
+- Detailed Specification: `docs/PHASE_09_LIVE_QUEUE_DESIGN.md`
 
 Deliverable:
-Clinic can operate without patients managing the queue themselves.
+Patient can safely monitor real-time queue progress from personal device.
 
 ### Phase 10 — Patient Queue Tracking
 - token screen

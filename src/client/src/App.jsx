@@ -21,6 +21,7 @@ import {
   pauseQueue,
   resumeQueue,
   cancelQueueEntry,
+  getPatientLiveQueue,
 } from './services/api';
 import './App.css';
 
@@ -434,11 +435,71 @@ export default function App() {
     }
   };
 
+  // Phase 09 Patient Live Queue State
+  const [liveQueueData, setLiveQueueData] = useState(null);
+  const [liveQueueLoading, setLiveQueueLoading] = useState(false);
+  const [liveQueueError, setLiveQueueError] = useState(null);
+  const [liveQueueLastUpdated, setLiveQueueLastUpdated] = useState(null);
+
+  const loadPatientLiveQueue = async () => {
+    if (!patientToken) return;
+    setLiveQueueLoading(true);
+    setLiveQueueError(null);
+    const res = await getPatientLiveQueue(patientToken);
+    setLiveQueueLoading(false);
+    if (res.ok && res.data?.success) {
+      setLiveQueueData(res.data);
+      setLiveQueueLastUpdated(new Date().toLocaleTimeString());
+    } else {
+      setLiveQueueError(res.data?.message || res.error || 'Failed to load live queue status');
+    }
+  };
+
   useEffect(() => {
     if (viewTab === 'reception' && staffToken) {
       loadTodayStaffQueue();
     }
   }, [viewTab, staffToken, receptionDoctorId]);
+
+  useEffect(() => {
+    if (viewTab === 'live_queue' && patientToken) {
+      loadPatientLiveQueue();
+
+      let intervalId = null;
+      const startPolling = () => {
+        if (!intervalId && !document.hidden) {
+          intervalId = setInterval(() => {
+            loadPatientLiveQueue();
+          }, 10000);
+        }
+      };
+
+      const stopPolling = () => {
+        if (intervalId) {
+          clearInterval(intervalId);
+          intervalId = null;
+        }
+      };
+
+      startPolling();
+
+      const handleVisibilityChange = () => {
+        if (document.hidden) {
+          stopPolling();
+        } else {
+          loadPatientLiveQueue();
+          startPolling();
+        }
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      return () => {
+        stopPolling();
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+    }
+  }, [viewTab, patientToken]);
 
   return (
     <div className="container">
@@ -457,6 +518,12 @@ export default function App() {
             onClick={() => setViewTab('my_appointments')}
           >
             📅 My Appointments
+          </button>
+          <button
+            className={`btn ${viewTab === 'live_queue' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setViewTab('live_queue')}
+          >
+            📱 Patient Live Queue
           </button>
           <button
             className={`btn ${viewTab === 'reception' ? 'btn-primary' : 'btn-secondary'}`}
@@ -885,6 +952,120 @@ export default function App() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      ) : viewTab === 'live_queue' ? (
+        /* VIEW: Patient Live Queue (Phase 09) */
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h2>📱 Live Queue Experience</h2>
+            <button className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.4rem 0.75rem' }} onClick={loadPatientLiveQueue}>
+              🔄 Refresh {liveQueueLoading && '...'}
+            </button>
+          </div>
+
+          {!patientToken ? (
+            <div className="empty-state">Please paste a valid Patient JWT token in the drawer above to view your live queue.</div>
+          ) : liveQueueLoading && !liveQueueData ? (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <div className="spinner" style={{ margin: '0 auto 1rem' }}></div>
+              <p style={{ color: 'var(--text-muted)' }}>Loading live queue progress...</p>
+            </div>
+          ) : liveQueueError ? (
+            <div>
+              <div style={{ color: '#ef4444', padding: '1rem', border: '1px solid #7f1d1d', borderRadius: '8px', background: '#180a0a', marginBottom: '1rem' }}>
+                ⚠️ {liveQueueError}
+              </div>
+              <button className="btn btn-secondary" onClick={loadPatientLiveQueue}>🔄 Retry Now</button>
+            </div>
+          ) : !liveQueueData || !liveQueueData.hasActiveEntry ? (
+            <div className="empty-state" style={{ padding: '2rem' }}>
+              ℹ️ No active queue entry found for today.
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                Check in for an online appointment or register as a walk-in at reception to track live progress.
+              </p>
+              <button className="btn btn-secondary" style={{ marginTop: '1rem' }} onClick={loadPatientLiveQueue}>🔄 Refresh Status</button>
+            </div>
+          ) : (
+            <div>
+              {liveQueueData.queue.isQueuePaused && (
+                <div style={{ background: '#7c2d12', border: '1px solid #ea580c', padding: '0.75rem 1rem', borderRadius: '8px', color: '#ffedd5', marginBottom: '1rem', fontWeight: 500 }}>
+                  ⏸️ QUEUE PAUSED BY DOCTOR: {liveQueueData.queue.queuePauseReason || 'Calling next is temporarily paused.'}
+                </div>
+              )}
+
+              {liveQueueData.queue.status === 'CALLED' && (
+                <div style={{ background: '#064e3b', border: '2px solid #10b981', padding: '1rem', borderRadius: '8px', color: '#ffffff', textAlign: 'center', marginBottom: '1.25rem' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.4rem', color: '#6ee7b7' }}>🔔 IT IS YOUR TURN!</h3>
+                  <p style={{ margin: '0.5rem 0 0', fontWeight: 'bold' }}>Please proceed immediately to {liveQueueData.queue.doctor?.fullName || 'the Doctor'}&apos;s consultation room.</p>
+                </div>
+              )}
+
+              {liveQueueData.queue.status === 'SKIPPED' && (
+                <div style={{ background: '#451a03', border: '1px solid #b45309', padding: '1rem', borderRadius: '8px', color: '#fef3c7', marginBottom: '1.25rem' }}>
+                  ⚠️ You were skipped by reception because you were not present when called. Please visit reception to <strong>REJOIN</strong> the queue.
+                </div>
+              )}
+
+              {liveQueueData.queue.status === 'NO_SHOW' && (
+                <div style={{ background: '#450a0a', border: '1px solid #991b1b', padding: '1rem', borderRadius: '8px', color: '#fecaca', marginBottom: '1.25rem' }}>
+                  ❌ Marked as No-Show. Please approach reception if you require assistance.
+                </div>
+              )}
+
+              {/* Main Grid Metrics */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+                <div style={{ background: '#111827', padding: '1rem', borderRadius: '8px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>MY TOKEN</span>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: 'var(--primary)' }}>#{liveQueueData.queue.tokenNumber}</div>
+                  <span className="badge badge-online">{liveQueueData.queue.status}</span>
+                </div>
+
+                <div style={{ background: '#111827', padding: '1rem', borderRadius: '8px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>CURRENTLY SERVING</span>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#38bdf8' }}>
+                    {liveQueueData.queue.currentServingToken ? `#${liveQueueData.queue.currentServingToken}` : '—'}
+                  </div>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    {liveQueueData.queue.servingState === 'IN_CONSULTATION' ? 'In Consultation' : liveQueueData.queue.servingState === 'CALLED' ? 'Called' : 'Idle'}
+                  </span>
+                </div>
+
+                <div style={{ background: '#111827', padding: '1rem', borderRadius: '8px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>QUEUE POSITION</span>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#a7f3d0' }}>
+                    {liveQueueData.queue.queuePosition ? `#${liveQueueData.queue.queuePosition}` : '—'}
+                  </div>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    {liveQueueData.queue.status === 'WAITING' ? `${liveQueueData.queue.peopleAhead} ahead of you` : liveQueueData.queue.status}
+                  </span>
+                </div>
+
+                <div style={{ background: '#111827', padding: '1rem', borderRadius: '8px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ESTIMATED WAIT</span>
+                  <div style={{ fontSize: '2.2rem', fontWeight: 'bold', color: '#fde047' }}>
+                    {liveQueueData.queue.status === 'WAITING' ? `~${liveQueueData.queue.estimatedWaitMinutes}m` : '0m'}
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    {liveQueueData.queue.isEstimated ? 'Approximate Estimate' : 'Exact'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Doctor & Clinic Info */}
+              <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem', marginTop: '1rem', fontSize: '0.9rem', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div>
+                  <strong>Doctor:</strong> {liveQueueData.queue.doctor?.fullName || 'Doctor'} ({liveQueueData.queue.doctor?.operationalStatus || 'AVAILABLE'})
+                  <br />
+                  <strong>Clinic:</strong> {liveQueueData.queue.clinic?.name || 'Clinic'}
+                </div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'right' }}>
+                  Auto-polling every 10s
+                  <br />
+                  Last updated: {liveQueueLastUpdated || 'Just now'}
+                </div>
+              </div>
             </div>
           )}
         </div>

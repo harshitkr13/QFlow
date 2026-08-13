@@ -141,6 +141,24 @@ export const checkInAppointment = async (id, token) => {
   }
 };
 
+// Patient Live Queue Experience (Phase 09)
+export const getPatientLiveQueue = async (token, appointmentId = null) => {
+  try {
+    let url = `${API_BASE_URL}/patient/queue/live`;
+    if (appointmentId) {
+      url += `?appointmentId=${encodeURIComponent(appointmentId)}`;
+    }
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
 // Staff Queue Operations (Phase 07)
 export const searchStaffPatients = async (searchData, token) => {
   try {
