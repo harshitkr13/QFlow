@@ -138,8 +138,8 @@ Implemented patient-facing live queue tracking:
 Deliverable:
 Patient live queue tracking completed, audited, tested (100% pass across 8 core tests & regression), and committed (`3760414`).
 
-### Phase 10 — Public Queue Display, Verified Ratings & Notifications (DESIGN SPECIFIED)
-Design & implement public display, ratings & notifications:
+### Phase 10 — Public Queue Display, Verified Ratings & Notifications (COMPLETE)
+Implemented public display, ratings & notifications:
 - public clinic queue display board (`GET /api/public/queue/display`)
 - verified patient ratings & doctor reviews (`POST /api/patient/ratings`)
 - atomic doctor rating recalculation
@@ -148,18 +148,20 @@ Design & implement public display, ratings & notifications:
 - Detailed Specification: `docs/PHASE_10_DESIGN.md`
 
 Deliverable:
-Anonymous public display board, verified ratings system, and in-app notifications design specified.
+Anonymous public display board, verified ratings system, and in-app notifications completed, audited, tested (100% pass across 9 core tests & regression), and committed (`5c0c606`).
 
-### Phase 11 — Ratings, History & Analytics
-- verified rating
-- consultation history
-- queue history
-- daily statistics
-- online/walk-in analytics
-- waiting/consultation averages
+### Phase 11 — Payment Architecture, Invoicing & Clinic Analytics (DESIGN SPECIFIED)
+Design & implement billing, payments & operational analytics:
+- provider-agnostic invoicing (`Invoice.js` model & status lifecycle)
+- payment tracking & verification (`Payment.js` model & provider abstraction)
+- server-controlled fee calculation & 1-invoice-per-consultation uniqueness
+- clinic operational analytics (`GET /api/staff/analytics/daily`) via MongoDB aggregations
+- doctor consultation performance (`GET /api/doctors/me/analytics`)
+- React Billing Modal, Staff Billing Manager & Analytics Dashboard components
+- Detailed Specification: `docs/PHASE_11_DESIGN.md`
 
 Deliverable:
-Operational reporting.
+Financial invoicing, payment abstraction, and operational analytics design specified.
 
 ### Phase 12 — Validation, Security & Production Hardening
 - server validation

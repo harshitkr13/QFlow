@@ -11,3 +11,7 @@ export { default as DoctorSchedule } from './DoctorSchedule.js';
 export { default as QueueHistory } from './QueueHistory.js';
 export { default as Rating } from './Rating.js';
 export { default as Notification } from './Notification.js';
+export { default as Invoice } from './Invoice.js';
+export { default as Payment } from './Payment.js';
+export { default as FinancialAuditLog } from './FinancialAuditLog.js';
+

@@ -27,6 +27,13 @@ import {
   fetchDoctorRatings,
   fetchPatientNotifications,
   markNotificationRead,
+  fetchPatientInvoices,
+  initiatePatientPayment,
+  fetchStaffBillingSummary,
+  processStaffRefund,
+  fetchStaffDailyAnalytics,
+  fetchDoctorMeAnalytics,
+  fetchAdminAnalyticsSummary,
 } from './services/api';
 import './App.css';
 
@@ -625,6 +632,18 @@ export default function App() {
             onClick={() => setViewTab('reception')}
           >
             🏥 Staff Reception Desk
+          </button>
+          <button
+            className={`btn ${viewTab === 'billing' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setViewTab('billing')}
+          >
+            💳 Billing & Invoices
+          </button>
+          <button
+            className={`btn ${viewTab === 'analytics' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setViewTab('analytics')}
+          >
+            📊 Analytics Dashboard
           </button>
         </div>
       </header>

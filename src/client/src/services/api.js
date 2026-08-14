@@ -433,3 +433,112 @@ export const cancelQueueEntry = async (id, reason, token) => {
     return { ok: false, status: 0, error: error.message };
   }
 };
+
+// Phase 11 Billing & Analytics API Helpers
+export const fetchPatientInvoices = async (token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/patient/invoices`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchPatientInvoiceById = async (id, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/patient/invoices/${id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const initiatePatientPayment = async (paymentData, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/patient/payments/initiate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(paymentData),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchStaffBillingSummary = async (clinicId, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/billing/summary?clinicId=${clinicId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const processStaffRefund = async (refundData, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/billing/refund`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(refundData),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchStaffDailyAnalytics = async (clinicId, date, token) => {
+  try {
+    const query = new URLSearchParams({ clinicId, date: date || '' }).toString();
+    const response = await fetch(`${API_BASE_URL}/staff/analytics/daily?${query}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchDoctorMeAnalytics = async (token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/doctors/me/analytics`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchAdminAnalyticsSummary = async (token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/admin/analytics/summary`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
