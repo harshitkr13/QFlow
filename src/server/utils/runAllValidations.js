@@ -19,11 +19,12 @@ const validationSuites = [
   { name: 'Phase 11 — Invoicing, Billing & Analytics', script: 'src/server/utils/validatePhase11.js' },
   { name: 'Phase 12 — Queue Intelligence & ML', script: 'src/server/utils/validatePhase12.js' },
   { name: 'Phase 13 — Production Hardening & Observability', script: 'src/server/utils/validatePhase13.js' },
+  { name: 'Phase 14 — Operational Resilience & Day-End Settlement', script: 'src/server/utils/validatePhase14.js' },
 ];
 
 console.log('====================================================');
 console.log('QFLOW MASTER REGRESSION TEST ORCHESTRATOR');
-console.log('Executing Phases 03 through 13 Validation Suites');
+console.log('Executing Phases 03 through 14 Validation Suites');
 console.log('====================================================\n');
 
 const results = [];

@@ -1186,3 +1186,294 @@ export const cancelQueueEntry = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * @desc    Triage Queue Priority Escalation (Phase 14)
+ * @route   PATCH /api/staff/queue/:id/triage
+ * @access  Private (STAFF, ADMIN)
+ */
+export const triageQueueEntry = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid queue entry ID format' });
+    }
+
+    const entry = await QueueEntry.findById(id);
+    if (!entry) {
+      return res.status(404).json({ success: false, message: 'Queue entry not found' });
+    }
+
+    // Role & Clinic Isolation Check
+    if (req.user.role === 'STAFF') {
+      if (!req.user.staffClinicId || req.user.staffClinicId.toString() !== entry.clinicId.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden: Staff cannot triage queue entries for another clinic',
+        });
+      }
+    } else if (req.user.role !== 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Unauthorized role for queue triage operations',
+      });
+    }
+
+    // Status Validation: Only WAITING entries can be triaged
+    if (entry.status !== 'WAITING') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only WAITING queue entries can be triaged',
+      });
+    }
+
+    const { priority, reason } = req.body;
+
+    // Reason Validation: Operational reason required, minimum 5 characters
+    if (!reason || typeof reason !== 'string' || reason.trim().length < 5) {
+      return res.status(400).json({
+        success: false,
+        message: 'Triage reason must be at least 5 characters',
+      });
+    }
+
+    // Priority Validation: NORMAL | PRIORITY | EMERGENCY (or URGENT mapped to PRIORITY)
+    const normalizedPriority = priority ? priority.toUpperCase() : null;
+    const weightMap = {
+      NORMAL: 1,
+      PRIORITY: 2,
+      EMERGENCY: 3,
+      URGENT: 2,
+    };
+
+    if (!normalizedPriority || !weightMap[normalizedPriority]) {
+      return res.status(400).json({
+        success: false,
+        message: 'Priority must be one of: NORMAL, PRIORITY, EMERGENCY',
+      });
+    }
+
+    const assignedPriority = normalizedPriority === 'URGENT' ? 'PRIORITY' : normalizedPriority;
+    const assignedWeight = weightMap[normalizedPriority];
+
+    // Update QueueEntry (Deterministic Phase 08 comparator consumes priorityWeight)
+    entry.priority = assignedPriority;
+    entry.priorityWeight = assignedWeight;
+    entry.triageReason = reason.trim();
+    entry.triagedAt = new Date();
+    entry.triagedBy = req.user._id || req.user.id;
+    await entry.save();
+
+    // Write Audit Record
+    const performedBy = req.user._id || req.user.id;
+    await QueueHistory.create({
+      queueEntryId: entry._id,
+      doctorId: entry.doctorId,
+      clinicId: entry.clinicId,
+      action: 'TRIAGE_ESCALATION',
+      previousState: 'WAITING',
+      newState: 'WAITING',
+      performedBy,
+      userRole: req.user.role,
+      reason: `Triage priority escalated to ${assignedPriority} (Weight: ${assignedWeight}): ${reason.trim()}`,
+      timestamp: new Date(),
+    });
+
+    // In-app Notification to Patient
+    await dispatchPatientNotification(
+      entry.patientId,
+      entry._id,
+      'QUEUE_UPDATE',
+      'Queue Priority Updated',
+      `Your queue priority has been updated to ${assignedPriority} by clinic triage staff.`
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Queue entry triage priority updated successfully',
+      queueEntry: entry,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Doctor Queue Transfer (Phase 14)
+ * @route   POST /api/staff/queue/:id/transfer
+ * @access  Private (STAFF, ADMIN)
+ */
+export const transferQueueDoctor = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid queue entry ID format' });
+    }
+
+    const entry = await QueueEntry.findById(id);
+    if (!entry) {
+      return res.status(404).json({ success: false, message: 'Queue entry not found' });
+    }
+
+    // Role & Clinic Isolation Check
+    if (req.user.role === 'STAFF') {
+      if (!req.user.staffClinicId || req.user.staffClinicId.toString() !== entry.clinicId.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden: Staff cannot transfer queue entries for another clinic',
+        });
+      }
+    } else if (req.user.role !== 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Unauthorized role for queue transfer operations',
+      });
+    }
+
+    // Status Validation: Only WAITING or SKIPPED entries can be transferred
+    if (entry.status !== 'WAITING' && entry.status !== 'SKIPPED') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only WAITING or SKIPPED queue entries can be transferred',
+      });
+    }
+
+    const { targetDoctorId, reason } = req.body;
+
+    // Reason Validation: Minimum 5 characters
+    if (!reason || typeof reason !== 'string' || reason.trim().length < 5) {
+      return res.status(400).json({
+        success: false,
+        message: 'Operational transfer reason must be at least 5 characters',
+      });
+    }
+
+    // Target Doctor ID Validation
+    if (!targetDoctorId || !mongoose.Types.ObjectId.isValid(targetDoctorId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid targetDoctorId is required',
+      });
+    }
+
+    // Target doctor cannot equal current doctor
+    if (entry.doctorId.toString() === targetDoctorId.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Target doctor cannot be the same as current doctor',
+      });
+    }
+
+    // Find target doctor and verify active status & clinic match
+    const targetDoctor = await Doctor.findById(targetDoctorId);
+    if (!targetDoctor || !targetDoctor.isActive) {
+      return res.status(404).json({
+        success: false,
+        message: 'Target doctor not found or inactive',
+      });
+    }
+
+    const targetClinicId = (targetDoctor.clinicId?._id || targetDoctor.clinicId).toString();
+    if (targetClinicId !== entry.clinicId.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Target doctor must belong to the same clinic',
+      });
+    }
+
+    // Specialty Match Validation
+    const currentDoctor = await Doctor.findById(entry.doctorId);
+    if (!currentDoctor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Current doctor profile not found',
+      });
+    }
+
+    const currentSpecialtyId = (currentDoctor.specialtyId?._id || currentDoctor.specialtyId).toString();
+    const targetSpecialtyId = (targetDoctor.specialtyId?._id || targetDoctor.specialtyId).toString();
+    if (currentSpecialtyId !== targetSpecialtyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Target doctor must have the same specialty as current doctor',
+      });
+    }
+
+    // Allocate Authoritative Atomic Token from Target Doctor's QueueCounter
+    const queueDate = entry.queueDate || getFormattedDateIST();
+    const counter = await QueueCounter.findOneAndUpdate(
+      {
+        clinicId: entry.clinicId,
+        doctorId: targetDoctor._id,
+        date: queueDate,
+      },
+      {
+        $inc: { lastTokenNumber: 1 },
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    const newTokenNumber = counter.lastTokenNumber;
+    const oldDoctorId = entry.doctorId;
+    const oldTokenNumber = entry.tokenNumber;
+
+    // Transfer QueueEntry: preserve joinedAt arrival seniority!
+    entry.transferredFromDoctorId = oldDoctorId;
+    entry.transferredAt = new Date();
+    entry.transferReason = reason.trim();
+    entry.doctorId = targetDoctor._id;
+    entry.tokenNumber = newTokenNumber;
+    // joinedAt remains untouched!
+    await entry.save();
+
+    // If linked appointment exists, update its doctorId
+    if (entry.appointmentId) {
+      await Appointment.findByIdAndUpdate(entry.appointmentId, {
+        doctorId: targetDoctor._id,
+      });
+    }
+
+    // Write Audit Record
+    const performedBy = req.user._id || req.user.id;
+    await QueueHistory.create({
+      queueEntryId: entry._id,
+      doctorId: targetDoctor._id,
+      clinicId: entry.clinicId,
+      action: 'QUEUE_TRANSFER',
+      previousState: entry.status,
+      newState: entry.status,
+      performedBy,
+      userRole: req.user.role,
+      reason: `Transferred from Dr. ${currentDoctor.fullName} (Token #${oldTokenNumber}) to Dr. ${targetDoctor.fullName} (Token #${newTokenNumber}): ${reason.trim()}`,
+      timestamp: new Date(),
+    });
+
+    // In-app Notification to Patient
+    await dispatchPatientNotification(
+      entry.patientId,
+      entry._id,
+      'QUEUE_TRANSFER',
+      'Doctor Queue Transferred',
+      `Your queue has been transferred to Dr. ${targetDoctor.fullName}. Your new token is #${newTokenNumber}. Your original arrival seniority is preserved.`
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Queue entry transferred successfully',
+      queueEntry: entry,
+      newTokenNumber,
+      oldTokenNumber,
+      targetDoctor: {
+        _id: targetDoctor._id,
+        fullName: targetDoctor.fullName,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

@@ -43,6 +43,12 @@ import {
   registerUser,
   updateDoctorSelfStatus,
   fetchDoctorOwnAppointments,
+  selfCheckInAppointment,
+  triageQueueEntry,
+  transferQueueDoctor,
+  fetchReconciliationPreview,
+  closeClinicDay,
+  fetchDailySettlements,
 } from './services/api';
 import './App.css';
 
@@ -424,6 +430,24 @@ export default function App() {
     }
   };
 
+  // Phase 14 Patient Self-Check-In
+  const [selfCheckInMessage, setSelfCheckInMessage] = useState(null);
+  const [selfCheckInLoading, setSelfCheckInLoading] = useState(false);
+
+  const handleSelfCheckIn = async (apptId) => {
+    if (!patientToken) return;
+    setSelfCheckInLoading(true);
+    setSelfCheckInMessage(null);
+    const res = await selfCheckInAppointment(apptId, patientToken);
+    if (res.ok && res.data?.success) {
+      setSelfCheckInMessage(`✓ Self Check-In Successful! Token #${res.data.queueEntry?.tokenNumber} allocated.`);
+      loadMyAppointments();
+    } else {
+      setSelfCheckInMessage(`Check-In Failed: ${res.data?.message || res.error || 'Server error'}`);
+    }
+    setSelfCheckInLoading(false);
+  };
+
   // Staff Patient Search
   const handleStaffPatientSearch = async () => {
     if (!staffToken || !searchQuery) return;
@@ -568,6 +592,128 @@ export default function App() {
       loadTodayStaffQueue();
     }
   };
+
+  // ----------------------------------------------------
+  // Phase 14: Triage Priority Escalation
+  // ----------------------------------------------------
+  const [triageModalEntry, setTriageModalEntry] = useState(null);
+  const [triagePriority, setTriagePriority] = useState('PRIORITY');
+  const [triageReason, setTriageReason] = useState('');
+  const [triageOpLoading, setTriageOpLoading] = useState(false);
+
+  const handleOpenTriage = (entry) => {
+    setTriageModalEntry(entry);
+    setTriagePriority(entry.priority === 'NORMAL' ? 'PRIORITY' : entry.priority || 'PRIORITY');
+    setTriageReason('');
+  };
+
+  const handleSubmitTriage = async () => {
+    if (!staffToken || !triageModalEntry) return;
+    setTriageOpLoading(true);
+    const res = await triageQueueEntry(
+      triageModalEntry._id,
+      { priority: triagePriority, reason: triageReason },
+      staffToken
+    );
+    if (res.ok) {
+      setReceptionMessage(`✓ Priority escalated to ${triagePriority} for Token #${triageModalEntry.tokenNumber}`);
+      setTriageModalEntry(null);
+      loadTodayStaffQueue();
+    } else {
+      setReceptionMessage(`Triage Failed: ${res.data?.message || res.error || 'Operation failed'}`);
+    }
+    setTriageOpLoading(false);
+  };
+
+  // ----------------------------------------------------
+  // Phase 14: Doctor Queue Transfer
+  // ----------------------------------------------------
+  const [transferModalEntry, setTransferModalEntry] = useState(null);
+  const [transferTargetDoctorId, setTransferTargetDoctorId] = useState('');
+  const [transferReason, setTransferReason] = useState('');
+  const [transferOpLoading, setTransferOpLoading] = useState(false);
+
+  const handleOpenTransfer = (entry) => {
+    setTransferModalEntry(entry);
+    setTransferTargetDoctorId('');
+    setTransferReason('');
+  };
+
+  const handleSubmitTransfer = async () => {
+    if (!staffToken || !transferModalEntry || !transferTargetDoctorId) return;
+    setTransferOpLoading(true);
+    const res = await transferQueueDoctor(
+      transferModalEntry._id,
+      { targetDoctorId: transferTargetDoctorId, reason: transferReason },
+      staffToken
+    );
+    if (res.ok) {
+      setReceptionMessage(`✓ Transferred Token #${transferModalEntry.tokenNumber} to Dr. ${res.data?.targetDoctor?.fullName || 'Doctor'} (New Token #${res.data?.newTokenNumber})`);
+      setTransferModalEntry(null);
+      loadTodayStaffQueue();
+    } else {
+      setReceptionMessage(`Transfer Failed: ${res.data?.message || res.error || 'Operation failed'}`);
+    }
+    setTransferOpLoading(false);
+  };
+
+  // ----------------------------------------------------
+  // Phase 14: Clinic Day-End Settlement & Reconciliation
+  // ----------------------------------------------------
+  const [settlementPreview, setSettlementPreview] = useState(null);
+  const [settlementLoading, setSettlementLoading] = useState(false);
+  const [settlementMessage, setSettlementMessage] = useState(null);
+  const [settlementNotes, setSettlementNotes] = useState('');
+  const [settlementForce, setSettlementForce] = useState(false);
+  const [settlementHistory, setSettlementHistory] = useState([]);
+
+  const loadSettlementPreview = useCallback(async () => {
+    const token = staffToken || adminToken;
+    if (!token) return;
+    setSettlementLoading(true);
+    const res = await fetchReconciliationPreview(null, token);
+    if (res.ok && res.data) {
+      setSettlementPreview(res.data);
+    } else {
+      setSettlementMessage(`Failed to load settlement preview: ${res.data?.message || res.error}`);
+    }
+    setSettlementLoading(false);
+  }, [staffToken, adminToken]);
+
+  const loadSettlementHistory = async () => {
+    const token = staffToken || adminToken;
+    if (!token) return;
+    const res = await fetchDailySettlements({}, token);
+    if (res.ok && res.data?.settlements) {
+      setSettlementHistory(res.data.settlements);
+    }
+  };
+
+  const handleCloseClinicDay = async () => {
+    const token = staffToken || adminToken;
+    if (!token) return;
+    setSettlementLoading(true);
+    setSettlementMessage(null);
+    const res = await closeClinicDay(
+      { notes: settlementNotes, force: settlementForce },
+      token
+    );
+    if (res.ok && res.data?.success) {
+      setSettlementMessage(`✓ Day Finalized! Expired ${res.data.expiredCount || 0} unserved entries, generated ${res.data.autoGeneratedInvoicesCount || 0} invoices.`);
+      loadSettlementPreview();
+      loadSettlementHistory();
+      loadTodayStaffQueue();
+    } else {
+      setSettlementMessage(`Settlement Failed: ${res.data?.message || res.error || 'Server error'}`);
+    }
+    setSettlementLoading(false);
+  };
+
+  useEffect(() => {
+    if (viewTab === 'settlement' && (staffToken || adminToken)) {
+      loadSettlementPreview();
+    }
+  }, [viewTab, staffToken, adminToken, loadSettlementPreview]);
 
   // Live Queue & Public Polling
   const loadLiveQueue = useCallback(async () => {
@@ -742,6 +888,9 @@ export default function App() {
             <>
               <button className={`btn ${viewTab === 'reception' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('reception')}>
                 🏥 Reception Desk
+              </button>
+              <button className={`btn ${viewTab === 'settlement' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('settlement')}>
+                🏁 Day-End Settlement
               </button>
               <button className={`btn ${viewTab === 'billing' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('billing')}>
                 💳 Billing & Refunds
@@ -1018,25 +1167,60 @@ export default function App() {
       {viewTab === 'my_appointments' && (
         <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
           <h2>📅 My Appointments</h2>
+          {selfCheckInMessage && (
+            <div style={{ background: '#090d16', border: '1px solid var(--primary)', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', color: '#6ee7b7', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div>{selfCheckInMessage}</div>
+              {selfCheckInMessage.includes('Token') && (
+                <button className="btn btn-primary" style={{ fontSize: '0.8rem', padding: '0.25rem 0.6rem' }} onClick={() => setViewTab('live_queue')}>
+                  Go to Live Queue Tracker →
+                </button>
+              )}
+            </div>
+          )}
           {myAppointments.length === 0 ? (
             <div className="empty-state">No appointments booked yet.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {myAppointments.map((appt) => (
-                <div key={appt._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                  <div>
-                    <div style={{ fontWeight: 'bold', fontSize: '1rem' }}>Dr. {appt.doctorId?.userId?.name || appt.doctorId?.fullName || 'Doctor'}</div>
-                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                      Date: {appt.appointmentDate} | Slot: {appt.slotTime} | Status: <strong style={{ color: 'var(--primary)' }}>{appt.status}</strong>
+              {myAppointments.map((appt) => {
+                const slotTime = appt.timeSlot?.startTime || appt.slotTime || '';
+                return (
+                  <div key={appt._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <div>
+                      <div style={{ fontWeight: 'bold', fontSize: '1rem' }}>Dr. {appt.doctorId?.userId?.name || appt.doctorId?.fullName || 'Doctor'}</div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                        Date: {appt.appointmentDate} | Slot: {slotTime} | Status: <strong style={{ color: appt.status === 'EXPIRED' ? '#ef4444' : 'var(--primary)' }}>{appt.status}</strong>
+                      </div>
+                      {appt.status === 'BOOKED' && (
+                        <div style={{ fontSize: '0.75rem', color: '#38bdf8', marginTop: '0.2rem' }}>
+                          Arrival window: 60 mins before to 30 mins after slot ({slotTime})
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      {appt.status === 'BOOKED' && (
+                        <>
+                          <button
+                            className="btn btn-primary"
+                            disabled={selfCheckInLoading}
+                            style={{ fontSize: '0.85rem' }}
+                            onClick={() => handleSelfCheckIn(appt._id)}
+                          >
+                            ✓ Check In Now (Get Token)
+                          </button>
+                          <button className="btn btn-secondary" style={{ color: '#ef4444', fontSize: '0.85rem' }} onClick={() => handleCancelAppointment(appt._id)}>
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                      {appt.status === 'CHECKED_IN' && (
+                        <button className="btn btn-secondary" style={{ fontSize: '0.85rem' }} onClick={() => setViewTab('live_queue')}>
+                          View Live Queue →
+                        </button>
+                      )}
                     </div>
                   </div>
-                  {appt.status === 'BOOKED' && (
-                    <button className="btn btn-secondary" style={{ color: '#ef4444' }} onClick={() => handleCancelAppointment(appt._id)}>
-                      Cancel
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -1196,14 +1380,306 @@ export default function App() {
                 <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No patients waiting.</div>
               ) : (
                 waitingEntries.map((entry) => (
-                  <div key={entry._id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid var(--border)' }}>
-                    <span>Token #{entry.tokenNumber} - {entry.patientId?.fullName || 'Patient'}</span>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{entry.source}</span>
+                  <div key={entry._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    <div>
+                      <div style={{ fontWeight: '600' }}>
+                        Token #{entry.tokenNumber} - {entry.patientId?.fullName || 'Patient'}
+                        {entry.priority && entry.priority !== 'NORMAL' && (
+                          <span style={{ marginLeft: '0.4rem', fontSize: '0.7rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: entry.priority === 'EMERGENCY' ? '#dc2626' : '#d97706', color: '#fff' }}>
+                            {entry.priority}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        {entry.source} {entry.triageReason ? `| Triage: ${entry.triageReason}` : ''}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.3rem' }}>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.7rem', padding: '0.2rem 0.45rem', color: '#f59e0b' }}
+                        onClick={() => handleOpenTriage(entry)}
+                      >
+                        ⚡ Triage
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.7rem', padding: '0.2rem 0.45rem', color: '#38bdf8' }}
+                        onClick={() => handleOpenTransfer(entry)}
+                      >
+                        🔀 Transfer
+                      </button>
+                    </div>
                   </div>
                 ))
               )}
             </div>
           </div>
+
+          {/* Phase 14 Triage Modal */}
+          {triageModalEntry && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+              <div style={{ background: '#0f172a', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem', maxWidth: '440px', width: '90%' }}>
+                <h3 style={{ margin: '0 0 0.5rem 0' }}>⚡ Triage Priority Escalation</h3>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+                  Token #{triageModalEntry.tokenNumber} — {triageModalEntry.patientId?.fullName || 'Patient'}
+                </p>
+                <div style={{ marginBottom: '1rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}>Priority Level:</label>
+                  <select
+                    className="filter-input"
+                    style={{ width: '100%' }}
+                    value={triagePriority}
+                    onChange={(e) => setTriagePriority(e.target.value)}
+                  >
+                    <option value="NORMAL">NORMAL (Default Sort Weight: 1)</option>
+                    <option value="PRIORITY">PRIORITY (Staff Escalated Weight: 2)</option>
+                    <option value="EMERGENCY">EMERGENCY (Urgent Weight: 3)</option>
+                  </select>
+                </div>
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}>
+                    Operational Reason (Non-clinical only, min 5 chars):
+                  </label>
+                  <input
+                    type="text"
+                    className="filter-input"
+                    style={{ width: '100%' }}
+                    placeholder="e.g. Elderly mobility assistance requested by triage"
+                    value={triageReason}
+                    onChange={(e) => setTriageReason(e.target.value)}
+                  />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                  <button className="btn btn-secondary" onClick={() => setTriageModalEntry(null)}>
+                    Cancel
+                  </button>
+                  <button
+                    className="btn btn-primary"
+                    disabled={triageOpLoading || triageReason.trim().length < 5}
+                    onClick={handleSubmitTriage}
+                  >
+                    {triageOpLoading ? 'Saving...' : 'Apply Priority'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Phase 14 Doctor Transfer Modal */}
+          {transferModalEntry && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+              <div style={{ background: '#0f172a', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem', maxWidth: '440px', width: '90%' }}>
+                <h3 style={{ margin: '0 0 0.5rem 0' }}>🔀 Transfer Patient to Doctor</h3>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+                  Token #{transferModalEntry.tokenNumber} — {transferModalEntry.patientId?.fullName || 'Patient'}
+                </p>
+                <div style={{ marginBottom: '1rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}>Target Doctor:</label>
+                  <select
+                    className="filter-input"
+                    style={{ width: '100%' }}
+                    value={transferTargetDoctorId}
+                    onChange={(e) => setTransferTargetDoctorId(e.target.value)}
+                  >
+                    <option value="">Select Replacement Doctor...</option>
+                    {doctors
+                      .filter((d) => d._id !== (transferModalEntry.doctorId?._id || transferModalEntry.doctorId))
+                      .map((d) => (
+                        <option key={d._id} value={d._id}>Dr. {d.fullName} ({d.specialtyId?.name || 'Doctor'})</option>
+                      ))}
+                  </select>
+                </div>
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem' }}>
+                    Operational Reason (min 5 chars):
+                  </label>
+                  <input
+                    type="text"
+                    className="filter-input"
+                    style={{ width: '100%' }}
+                    placeholder="e.g. Doctor called away; transferring waiting queue"
+                    value={transferReason}
+                    onChange={(e) => setTransferReason(e.target.value)}
+                  />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                  <button className="btn btn-secondary" onClick={() => setTransferModalEntry(null)}>
+                    Cancel
+                  </button>
+                  <button
+                    className="btn btn-primary"
+                    disabled={transferOpLoading || !transferTargetDoctorId || transferReason.trim().length < 5}
+                    onClick={handleSubmitTransfer}
+                  >
+                    {transferOpLoading ? 'Transferring...' : 'Execute Transfer'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* VIEW: Day-End Settlement & Reconciliation (Phase 14) */}
+      {viewTab === 'settlement' && (
+        <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <div>
+              <h2 style={{ margin: 0 }}>🏁 Clinic Day-End Settlement & Reconciliation</h2>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                Reconcile active queues, expire unserved patients, auto-generate missing invoices, and close the clinic day.
+              </div>
+            </div>
+            <button className="btn btn-secondary" onClick={loadSettlementPreview}>
+              🔄 Refresh Preview
+            </button>
+          </div>
+
+          {settlementMessage && (
+            <div style={{ background: '#1c1917', border: '1px solid var(--primary)', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', color: 'var(--text-main)' }}>
+              {settlementMessage}
+            </div>
+          )}
+
+          {settlementPreview ? (
+            <div>
+              {/* Status Banner */}
+              <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', background: settlementPreview.isClosed ? '#064e3b' : '#1e293b', border: `1px solid ${settlementPreview.isClosed ? '#10b981' : 'var(--border)'}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div>
+                  <strong>Settlement Status:</strong> {settlementPreview.isClosed ? '✓ CLINIC DAY CLOSED' : '⏳ OPEN FOR VISITS'} (Date: {settlementPreview.date})
+                </div>
+                {settlementPreview.isClosed && (
+                  <span style={{ fontSize: '0.8rem', color: '#6ee7b7' }}>Authoritative daily settlement document recorded</span>
+                )}
+              </div>
+
+              {/* Metric Cards Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Total Tokens Issued</div>
+                  <div style={{ fontSize: '1.8rem', fontWeight: 'bold' }}>{settlementPreview.summary?.totalTokensIssued || 0}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Online: {settlementPreview.summary?.appointmentCount || 0} | Walk-in: {settlementPreview.summary?.walkInCount || 0}
+                  </div>
+                </div>
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Completed Visits</div>
+                  <div style={{ fontSize: '1.8rem', fontWeight: 'bold', color: '#10b981' }}>{settlementPreview.summary?.completedCount || 0}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Unbilled: {settlementPreview.billing?.unbilledCompletedCount || 0}
+                  </div>
+                </div>
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Unserved to Expire</div>
+                  <div style={{ fontSize: '1.8rem', fontWeight: 'bold', color: '#ef4444' }}>{settlementPreview.unservedCount || 0}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Waiting: {settlementPreview.summary?.waitingCount || 0} | Skipped: {settlementPreview.summary?.skippedCount || 0}
+                  </div>
+                </div>
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Active Consultations</div>
+                  <div style={{ fontSize: '1.8rem', fontWeight: 'bold', color: settlementPreview.hasActiveConsultations ? '#f59e0b' : '#10b981' }}>
+                    {settlementPreview.summary?.inConsultationCount || 0}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    {settlementPreview.hasActiveConsultations ? '⚠️ Must finish before closure' : '✓ No rooms active'}
+                  </div>
+                </div>
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Total Invoiced</div>
+                  <div style={{ fontSize: '1.8rem', fontWeight: 'bold', color: 'var(--primary)' }}>₹{settlementPreview.billing?.totalInvoiced || 0}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Collected: ₹{settlementPreview.billing?.totalCollected || 0}
+                  </div>
+                </div>
+              </div>
+
+              {/* Active Consultations Warning if any */}
+              {settlementPreview.hasActiveConsultations && (
+                <div style={{ background: '#451a03', border: '1px solid #f59e0b', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
+                  <h4 style={{ color: '#fbbf24', margin: '0 0 0.5rem 0' }}>⚠️ Active Consultations In Progress</h4>
+                  <p style={{ fontSize: '0.85rem', margin: 0 }}>
+                    Consultation rooms currently active. Please complete visits before closure or enable force closure:
+                  </p>
+                  <ul style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.25rem', fontSize: '0.85rem' }}>
+                    {settlementPreview.activeConsultations?.map((ac) => (
+                      <li key={ac._id}>Token #{ac.tokenNumber} with Dr. {ac.doctorName} (Patient: {ac.patientName})</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Close Day Action Form (if not closed) */}
+              {!settlementPreview.isClosed && (
+                <div style={{ background: '#090d16', padding: '1.25rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.5rem' }}>
+                  <h4 style={{ margin: '0 0 0.5rem 0' }}>Finalize & Close Clinic Day</h4>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                    Closing will expire all {settlementPreview.unservedCount || 0} remaining unserved entries, auto-generate invoices for unbilled visits, and record the daily settlement audit ledger.
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '500px' }}>
+                    <input
+                      type="text"
+                      className="filter-input"
+                      placeholder="Optional settlement notes (e.g. Normal clinic closure by reception desk)..."
+                      value={settlementNotes}
+                      onChange={(e) => setSettlementNotes(e.target.value)}
+                    />
+                    {settlementPreview.hasActiveConsultations && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: '#f59e0b' }}>
+                        <input
+                          type="checkbox"
+                          checked={settlementForce}
+                          onChange={(e) => setSettlementForce(e.target.checked)}
+                        />
+                        Force closure despite active consultations
+                      </label>
+                    )}
+                    <button
+                      className="btn btn-primary"
+                      disabled={settlementLoading || (settlementPreview.hasActiveConsultations && !settlementForce)}
+                      onClick={handleCloseClinicDay}
+                      style={{ alignSelf: 'flex-start' }}
+                    >
+                      {settlementLoading ? 'Finalizing Day...' : '🔒 Finalize & Close Clinic Day'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Settlement History Section */}
+              <div style={{ background: '#090d16', padding: '1.25rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <h4 style={{ margin: 0 }}>📜 Settlement History</h4>
+                  <button className="btn btn-secondary" style={{ fontSize: '0.75rem' }} onClick={loadSettlementHistory}>
+                    Load Past Closures
+                  </button>
+                </div>
+                {settlementHistory.length === 0 ? (
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Click &quot;Load Past Closures&quot; to view settlement audit history.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {settlementHistory.map((s) => (
+                      <div key={s._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem', background: '#020617', borderRadius: '6px', border: '1px solid var(--border)', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <div>
+                          <strong>{s.date}</strong> — Status: <span style={{ color: '#10b981' }}>{s.status}</span>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                            Closed by: {s.closedBy?.name || 'Staff'} at {new Date(s.closedAt).toLocaleTimeString()} {s.notes ? `| Note: ${s.notes}` : ''}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right', fontSize: '0.85rem' }}>
+                          <div>Tokens: {s.metrics?.totalTokensIssued || 0} | Served: {s.metrics?.completedVisits || 0} | Expired: {s.metrics?.expiredVisits || 0}</div>
+                          <div style={{ color: 'var(--primary)' }}>Revenue Collected: ₹{s.metrics?.totalRevenueCollected || 0}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="empty-state">Loading settlement preview...</div>
+          )}
         </div>
       )}
 

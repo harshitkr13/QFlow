@@ -19,6 +19,7 @@ import patientNotificationRoutes from './routes/patientNotificationRoutes.js';
 import billingRoutes from './routes/billingRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
 import intelligenceRoutes from './routes/intelligenceRoutes.js';
+import reconciliationRoutes from './routes/reconciliationRoutes.js';
 import { notFoundHandler, errorHandler } from './middleware/errorMiddleware.js';
 import {
   securityHeaders,
@@ -59,6 +60,7 @@ app.use('/api/specialties', specialtyRoutes);
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/staff/queue', staffQueueRoutes);
+app.use('/api/staff/reconciliation', reconciliationRoutes);
 app.use('/api/patient/queue', patientQueueRoutes);
 app.use('/api/patient/notifications', patientNotificationRoutes);
 app.use('/api/public/queue', publicQueueRoutes);

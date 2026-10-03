@@ -32,6 +32,11 @@ const queueHistorySchema = new mongoose.Schema(
         'PAUSE_QUEUE',
         'RESUME_QUEUE',
         'STATUS_CHANGE',
+        'SELF_CHECK_IN',
+        'TRIAGE_ESCALATION',
+        'QUEUE_TRANSFER',
+        'EXPIRED',
+        'DAY_END_EXPIRED',
       ],
     },
     previousState: {

@@ -13,6 +13,8 @@ import {
   pauseQueue,
   resumeQueue,
   cancelQueueEntry,
+  triageQueueEntry,
+  transferQueueDoctor,
 } from '../controllers/staffQueueController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 
@@ -36,5 +38,9 @@ router.patch('/:id/skip', skipPatient);
 router.patch('/:id/no-show', markNoShow);
 router.post('/:id/rejoin', rejoinPatient);
 router.patch('/:id/cancel', cancelQueueEntry);
+
+// Phase 14 Operational Resilience & Queue Exception Endpoints
+router.patch('/:id/triage', authorize('STAFF', 'ADMIN'), triageQueueEntry);
+router.post('/:id/transfer', authorize('STAFF', 'ADMIN'), transferQueueDoctor);
 
 export default router;

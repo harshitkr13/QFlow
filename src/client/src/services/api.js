@@ -667,5 +667,106 @@ export const fetchDoctorOwnAppointments = async (token) => {
   }
 };
 
+// Phase 14 Client API Helpers (Operational Resilience, Triage, Transfer & Day-End Settlement)
+export const selfCheckInAppointment = async (appointmentId, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/appointments/${appointmentId}/self-check-in`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const triageQueueEntry = async (queueEntryId, triageData, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/queue/${queueEntryId}/triage`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(triageData),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const transferQueueDoctor = async (queueEntryId, transferData, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/queue/${queueEntryId}/transfer`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(transferData),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchReconciliationPreview = async (date, token, clinicId = null) => {
+  try {
+    const query = new URLSearchParams();
+    if (date) query.append('date', date);
+    if (clinicId) query.append('clinicId', clinicId);
+
+    const response = await fetch(`${API_BASE_URL}/staff/reconciliation/daily-preview?${query.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const closeClinicDay = async (closeData, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/reconciliation/close-day`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(closeData),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchDailySettlements = async (params = {}, token) => {
+  try {
+    const query = new URLSearchParams();
+    if (params.date) query.append('date', params.date);
+    if (params.clinicId) query.append('clinicId', params.clinicId);
+
+    const response = await fetch(`${API_BASE_URL}/staff/reconciliation/history?${query.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+
 
 

@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { Appointment, Doctor, DoctorSchedule, Patient, QueueCounter, QueueEntry, QueueHistory } from '../models/index.js';
+import { Appointment, Doctor, DoctorSchedule, Patient, QueueCounter, QueueEntry, QueueHistory, Notification } from '../models/index.js';
 
 /**
  * Helper to format date YYYY-MM-DD in Asia/Kolkata timezone
@@ -615,6 +615,220 @@ export const checkInAppointment = async (req, res, next) => {
       );
 
       if (txError.code === 11000 || txError.code === 112 || (txError.errorLabelSet && txError.errorLabelSet.has('TransientTransactionError'))) {
+        return res.status(409).json({
+          success: false,
+          message: 'Queue entry already exists for this appointment or active patient queue slot',
+        });
+      }
+      throw txError;
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Patient Self-Check-In for Booked Appointments (Phase 14)
+ * @route   POST /api/appointments/:id/self-check-in
+ * @access  Private (PATIENT)
+ */
+export const selfCheckInAppointment = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid appointment ID format' });
+    }
+
+    const appointment = await Appointment.findById(id);
+    if (!appointment) {
+      return res.status(404).json({ success: false, message: 'Appointment not found' });
+    }
+
+    // Role Ownership Validation (IDOR Protection)
+    const userId = req.user._id || req.user.id;
+    let patient = await Patient.findOne({ userId });
+    if (!patient && req.user.patientId) {
+      patient = await Patient.findOne({ _id: req.user.patientId });
+    }
+    if (!patient) {
+      return res.status(404).json({ success: false, message: 'Patient profile not found' });
+    }
+
+    const apptPatientId = (appointment.patientId._id || appointment.patientId).toString();
+    if (apptPatientId !== patient._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: You can only check in for your own appointment',
+      });
+    }
+
+    // Status Validation: Only BOOKED appointments can be checked in
+    if (appointment.status !== 'BOOKED') {
+      return res.status(400).json({
+        success: false,
+        message: `Appointment cannot be checked in as it is currently in '${appointment.status}' status`,
+      });
+    }
+
+    // Server-Authoritative Date & Time Window Validation ([-60 mins, +30 mins])
+    const todayIST = getFormattedDateIST();
+    if (appointment.appointmentDate !== todayIST) {
+      return res.status(400).json({
+        success: false,
+        message: 'Check-in is only permitted on the scheduled appointment date',
+      });
+    }
+
+    const currentTimeIST = getFormattedTimeIST();
+    const currentMin = timeToMinutes(currentTimeIST);
+    const slotStartMin = timeToMinutes(appointment.timeSlot.startTime);
+
+    if (currentMin < slotStartMin - 60) {
+      return res.status(400).json({
+        success: false,
+        message: 'Self check-in window opens 60 minutes before appointment start time',
+      });
+    }
+
+    if (currentMin > slotStartMin + 30) {
+      return res.status(400).json({
+        success: false,
+        message: 'Self check-in window closed 30 minutes after appointment start time',
+      });
+    }
+
+    // Prevent duplicate check-in by checking existing QueueEntry for this appointment
+    const existingEntry = await QueueEntry.findOne({ appointmentId: appointment._id });
+    if (existingEntry) {
+      return res.status(409).json({
+        success: false,
+        message: 'Queue entry already exists for this appointment',
+      });
+    }
+
+    // Atomic State Transition on Appointment (BOOKED -> CHECKED_IN)
+    const updatedAppt = await Appointment.findOneAndUpdate(
+      { _id: appointment._id, status: 'BOOKED' },
+      { status: 'CHECKED_IN', checkedInAt: new Date() },
+      { new: true }
+    );
+
+    if (!updatedAppt) {
+      return res.status(400).json({
+        success: false,
+        message: 'Appointment is already checked in or cannot be checked in',
+      });
+    }
+
+    // Authoritative Atomic QueueCounter Token Allocation (Outside MongoDB Transaction)
+    const counter = await QueueCounter.findOneAndUpdate(
+      {
+        clinicId: appointment.clinicId,
+        doctorId: appointment.doctorId,
+        date: todayIST,
+      },
+      {
+        $inc: { lastTokenNumber: 1 },
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    const tokenNumber = counter.lastTokenNumber;
+    const [slotHours, slotMins] = appointment.timeSlot.startTime.split(':').map(Number);
+    const slotTotalMinutes = slotHours * 60 + slotMins;
+    const effectiveSlotMinutes = currentMin > slotTotalMinutes ? currentMin : slotTotalMinutes;
+
+    // Transaction Block for QueueEntry + QueueHistory
+    const session = await mongoose.startSession();
+    try {
+      session.startTransaction();
+
+      const [queueEntry] = await QueueEntry.create(
+        [
+          {
+            clinicId: appointment.clinicId,
+            doctorId: appointment.doctorId,
+            patientId: patient._id,
+            appointmentId: appointment._id,
+            queueDate: todayIST,
+            tokenNumber,
+            source: 'ONLINE',
+            priority: 'NORMAL',
+            priorityWeight: 1,
+            effectiveSlotMinutes,
+            status: 'WAITING',
+            joinedAt: new Date(),
+          },
+        ],
+        { session }
+      );
+
+      await QueueHistory.create(
+        [
+          {
+            queueEntryId: queueEntry._id,
+            doctorId: appointment.doctorId,
+            clinicId: appointment.clinicId,
+            action: 'SELF_CHECK_IN',
+            previousState: null,
+            newState: 'WAITING',
+            performedBy: userId,
+            userRole: req.user.role,
+            reason: 'Patient self-checked in via patient portal',
+            timestamp: new Date(),
+          },
+        ],
+        { session }
+      );
+
+      await session.commitTransaction();
+      session.endSession();
+
+      // Dispatch Confirmation Notification (Non-blocking)
+      try {
+        await Notification.create({
+          patientId: patient._id,
+          queueEntryId: queueEntry._id,
+          type: 'CHECK_IN_CONFIRMATION',
+          title: 'Self Check-In Successful',
+          message: `You have successfully checked in! Your Token is #${tokenNumber}. Please track your live queue status.`,
+        });
+      } catch (_) {}
+
+      return res.status(200).json({
+        success: true,
+        message: 'Self check-in completed successfully',
+        appointment: updatedAppt,
+        queueEntry: {
+          _id: queueEntry._id,
+          tokenNumber: queueEntry.tokenNumber,
+          queueDate: queueEntry.queueDate,
+          source: queueEntry.source,
+          status: queueEntry.status,
+          priority: queueEntry.priority,
+          priorityWeight: queueEntry.priorityWeight,
+          joinedAt: queueEntry.joinedAt,
+        },
+      });
+    } catch (txError) {
+      await session.abortTransaction();
+      session.endSession();
+
+      // Recovery: Revert Appointment status back to BOOKED
+      await Appointment.updateOne(
+        { _id: appointment._id, status: 'CHECKED_IN' },
+        { status: 'BOOKED', checkedInAt: null }
+      );
+
+      if (
+        txError.code === 11000 ||
+        txError.code === 112 ||
+        (txError.errorLabelSet && txError.errorLabelSet.has('TransientTransactionError'))
+      ) {
         return res.status(409).json({
           success: false,
           message: 'Queue entry already exists for this appointment or active patient queue slot',

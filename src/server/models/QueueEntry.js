@@ -37,12 +37,12 @@ const queueEntrySchema = new mongoose.Schema(
     },
     priority: {
       type: String,
-      enum: ['NORMAL', 'URGENT'],
+      enum: ['NORMAL', 'URGENT', 'PRIORITY', 'EMERGENCY'],
       default: 'NORMAL',
     },
     status: {
       type: String,
-      enum: ['WAITING', 'CALLED', 'IN_CONSULTATION', 'COMPLETED', 'SKIPPED', 'NO_SHOW', 'CANCELLED'],
+      enum: ['WAITING', 'CALLED', 'IN_CONSULTATION', 'COMPLETED', 'SKIPPED', 'NO_SHOW', 'CANCELLED', 'EXPIRED'],
       default: 'WAITING',
     },
     joinedAt: {
@@ -56,7 +56,7 @@ const queueEntrySchema = new mongoose.Schema(
     },
     priorityWeight: {
       type: Number,
-      default: 1, // 0 for URGENT, 1 for NORMAL
+      default: 1, // 0 for URGENT, 1 for NORMAL, 2 for PRIORITY, 3 for EMERGENCY
     },
     skippedAt: {
       type: Date,
@@ -80,6 +80,32 @@ const queueEntrySchema = new mongoose.Schema(
     },
     completedAt: {
       type: Date,
+      default: null,
+    },
+    transferredFromDoctorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Doctor',
+      default: null,
+    },
+    transferredAt: {
+      type: Date,
+      default: null,
+    },
+    transferReason: {
+      type: String,
+      default: null,
+    },
+    triageReason: {
+      type: String,
+      default: null,
+    },
+    triagedAt: {
+      type: Date,
+      default: null,
+    },
+    triagedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
       default: null,
     },
   },

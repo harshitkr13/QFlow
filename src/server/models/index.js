@@ -14,4 +14,5 @@ export { default as Notification } from './Notification.js';
 export { default as Invoice } from './Invoice.js';
 export { default as Payment } from './Payment.js';
 export { default as FinancialAuditLog } from './FinancialAuditLog.js';
+export { default as DailySettlement } from './DailySettlement.js';
 
