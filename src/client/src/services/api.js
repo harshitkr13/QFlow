@@ -227,6 +227,8 @@ export const markNotificationRead = async (notificationId, token) => {
   }
 };
 
+export const markNotificationAsRead = markNotificationRead;
+
 // Staff Queue Operations (Phase 07)
 export const searchStaffPatients = async (searchData, token) => {
   try {
@@ -606,5 +608,64 @@ export const fetchAdminIntelligenceSummary = async (token) => {
     return { ok: false, status: 0, error: error.message };
   }
 };
+
+// Phase 13 Client API Helpers (Auth, Notifications & Doctor Workspace)
+export const loginUser = async (credentials) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credentials),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const registerUser = async (userData) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(userData),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const updateDoctorSelfStatus = async (statusData, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/doctors/me/status`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(statusData),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchDoctorOwnAppointments = async (token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/doctors/me/appointments`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
 
 

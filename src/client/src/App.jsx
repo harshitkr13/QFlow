@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   fetchSpecialties,
   discoverDoctors,
@@ -26,7 +26,7 @@ import {
   submitPatientRating,
   fetchDoctorRatings,
   fetchPatientNotifications,
-  markNotificationRead,
+  markNotificationAsRead,
   fetchPatientInvoices,
   initiatePatientPayment,
   fetchStaffBillingSummary,
@@ -39,16 +39,222 @@ import {
   fetchStaffAnomalies,
   fetchDoctorOwnIntelligence,
   fetchAdminIntelligenceSummary,
+  loginUser,
+  registerUser,
+  updateDoctorSelfStatus,
+  fetchDoctorOwnAppointments,
 } from './services/api';
 import './App.css';
 
 export default function App() {
+  // ----------------------------------------------------
+  // Persistent Authentication & Role Session State (Phase 13)
+  // ----------------------------------------------------
+  const [authSession, setAuthSession] = useState(() => {
+    try {
+      const saved = localStorage.getItem('qflow_auth_session');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
+  const [authForm, setAuthForm] = useState({
+    email: '',
+    password: '',
+    fullName: '',
+    phone: '',
+    gender: 'MALE',
+    dateOfBirth: '1995-01-01',
+  });
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState(null);
+
+  // Synchronize role tokens with session
+  const currentRole = authSession?.user?.role || 'GUEST';
+  const currentToken = authSession?.token || '';
+
+  const [patientToken, setPatientToken] = useState(currentRole === 'PATIENT' ? currentToken : '');
+  const [staffToken, setStaffToken] = useState((currentRole === 'STAFF' || currentRole === 'ADMIN') ? currentToken : '');
+  const [doctorToken, setDoctorToken] = useState(currentRole === 'DOCTOR' ? currentToken : '');
+  const [adminToken, setAdminToken] = useState(currentRole === 'ADMIN' ? currentToken : '');
+
+  useEffect(() => {
+    if (authSession?.token) {
+      localStorage.setItem('qflow_auth_session', JSON.stringify(authSession));
+      const role = authSession.user.role;
+      if (role === 'PATIENT') setPatientToken(authSession.token);
+      if (role === 'STAFF') setStaffToken(authSession.token);
+      if (role === 'DOCTOR') setDoctorToken(authSession.token);
+      if (role === 'ADMIN') {
+        setAdminToken(authSession.token);
+        setStaffToken(authSession.token);
+      }
+    } else {
+      localStorage.removeItem('qflow_auth_session');
+    }
+  }, [authSession]);
+
+  // Tab View Routing
+  const [viewTab, setViewTab] = useState(() => {
+    if (currentRole === 'STAFF') return 'reception';
+    if (currentRole === 'DOCTOR') return 'doctor_cockpit';
+    if (currentRole === 'ADMIN') return 'reception';
+    return 'discover';
+  });
+
+  // Tab visibility tracker for polling control (Phase 13)
+  const [isTabVisible, setIsTabVisible] = useState(true);
+  useEffect(() => {
+    const handleVisChange = () => {
+      setIsTabVisible(document.visibilityState === 'visible');
+    };
+    document.addEventListener('visibilitychange', handleVisChange);
+    return () => document.removeEventListener('visibilitychange', handleVisChange);
+  }, []);
+
+  // ----------------------------------------------------
+  // Interactive Notification Center State (Phase 13)
+  // ----------------------------------------------------
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotificationDrawer, setShowNotificationDrawer] = useState(false);
+
+  const loadNotifications = useCallback(async () => {
+    if (!patientToken) return;
+    const res = await fetchPatientNotifications(patientToken);
+    if (res.ok && res.data) {
+      setNotifications(res.data.notifications || []);
+      setUnreadCount(res.data.unreadCount || 0);
+    }
+  }, [patientToken]);
+
+  useEffect(() => {
+    if (patientToken && isTabVisible) {
+      loadNotifications();
+      const interval = setInterval(loadNotifications, 15000);
+      return () => clearInterval(interval);
+    }
+  }, [patientToken, isTabVisible, loadNotifications]);
+
+  const handleMarkAsRead = async (notifId) => {
+    if (!patientToken) return;
+    const res = await markNotificationAsRead(notifId, patientToken);
+    if (res.ok) {
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === notifId ? { ...n, isRead: true } : n))
+      );
+      setUnreadCount((c) => Math.max(0, c - 1));
+    }
+  };
+
+  // ----------------------------------------------------
+  // Doctor Examination Cockpit State (Phase 13)
+  // ----------------------------------------------------
+  const [doctorQueueData, setDoctorQueueData] = useState([]);
+  const [doctorActivePatient, setDoctorActivePatient] = useState(null);
+  const [doctorLiveStatus, setDoctorLiveStatus] = useState('AVAILABLE');
+  const [doctorIntel, setDoctorIntel] = useState(null);
+  const [doctorOpLoading, setDoctorOpLoading] = useState(false);
+  const [doctorMessage, setDoctorMessage] = useState(null);
+
+  const loadDoctorCockpit = useCallback(async () => {
+    if (!doctorToken) return;
+    // Fetch doctor intelligence and status
+    const intelRes = await fetchDoctorOwnIntelligence(doctorToken);
+    if (intelRes.ok && intelRes.data?.data) {
+      setDoctorIntel(intelRes.data.data);
+    }
+
+    // Fetch today's queue for doctor's clinic
+    const todayRes = await fetchTodayStaffQueue(doctorToken);
+    if (todayRes.ok && todayRes.data?.queue) {
+      const allQueue = todayRes.data.queue;
+      // Filter for this doctor's patients
+      const myDoctorId = intelRes.data?.data?.doctorId;
+      const myQueue = myDoctorId ? allQueue.filter((q) => q.doctorId?.toString() === myDoctorId) : allQueue;
+
+      const active = myQueue.find((q) => q.status === 'IN_CONSULTATION' || q.status === 'CALLED');
+      setDoctorActivePatient(active || null);
+      setDoctorQueueData(myQueue.filter((q) => q.status === 'WAITING'));
+    }
+  }, [doctorToken]);
+
+  useEffect(() => {
+    if (viewTab === 'doctor_cockpit' && doctorToken && isTabVisible) {
+      loadDoctorCockpit();
+      const interval = setInterval(loadDoctorCockpit, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [viewTab, doctorToken, isTabVisible, loadDoctorCockpit]);
+
+  const handleDoctorStatusUpdate = async (status) => {
+    if (!doctorToken) return;
+    setDoctorOpLoading(true);
+    setDoctorMessage(null);
+    const res = await updateDoctorSelfStatus({ operationalStatus: status }, doctorToken);
+    if (res.ok) {
+      setDoctorLiveStatus(status);
+      setDoctorMessage(`✓ Operational status updated to ${status}`);
+    } else {
+      setDoctorMessage(`Error: ${res.data?.message || res.error}`);
+    }
+    setDoctorOpLoading(false);
+  };
+
+  const handleDoctorCallNext = async () => {
+    if (!doctorToken) return;
+    setDoctorOpLoading(true);
+    setDoctorMessage(null);
+    const docId = doctorIntel?.doctorId;
+    const res = await callNextPatient(docId, doctorToken);
+    if (res.ok) {
+      setDoctorMessage(`✓ Called Patient Token #${res.data.queueEntry?.tokenNumber}`);
+      loadDoctorCockpit();
+    } else {
+      setDoctorMessage(`Error: ${res.data?.message || res.error}`);
+    }
+    setDoctorOpLoading(false);
+  };
+
+  const handleDoctorStartConsultation = async () => {
+    if (!doctorToken || !doctorActivePatient) return;
+    setDoctorOpLoading(true);
+    setDoctorMessage(null);
+    const res = await startConsultation(doctorActivePatient._id, doctorToken);
+    if (res.ok) {
+      setDoctorMessage('✓ Consultation started successfully');
+      loadDoctorCockpit();
+    } else {
+      setDoctorMessage(`Error: ${res.data?.message || res.error}`);
+    }
+    setDoctorOpLoading(false);
+  };
+
+  const handleDoctorCompleteConsultation = async () => {
+    if (!doctorToken || !doctorActivePatient) return;
+    setDoctorOpLoading(true);
+    setDoctorMessage(null);
+    const res = await completeConsultation(doctorActivePatient._id, doctorToken);
+    if (res.ok) {
+      setDoctorMessage('✓ Consultation completed successfully');
+      loadDoctorCockpit();
+    } else {
+      setDoctorMessage(`Error: ${res.data?.message || res.error}`);
+    }
+    setDoctorOpLoading(false);
+  };
+
+  // ----------------------------------------------------
+  // Discovery, Booking, and Standard State
+  // ----------------------------------------------------
   const [specialties, setSpecialties] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Filters state
   const [selectedSpecialty, setSelectedSpecialty] = useState('');
   const [sort, setSort] = useState('rating');
   const [minRating, setMinRating] = useState('');
@@ -57,46 +263,50 @@ export default function App() {
   const [doctorGender, setDoctorGender] = useState('');
   const [radiusKm, setRadiusKm] = useState(25);
 
-  // Location state
   const [coords, setCoords] = useState(null);
   const [locStatus, setLocStatus] = useState('Location: Not requested');
 
-  // Modal / Profile state
   const [selectedDoctor, setSelectedDoctor] = useState(null);
   const [profileData, setProfileData] = useState(null);
 
-  // Stage 3 Booking State
   const [bookingDoctor, setBookingDoctor] = useState(null);
-  const [selectedDate, setSelectedDate] = useState(() => {
-    const today = new Date();
-    return today.toISOString().split('T')[0];
-  });
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [availability, setAvailability] = useState(null);
   const [loadingAvail, setLoadingAvail] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [bookingSuccess, setBookingSuccess] = useState(null);
   const [bookingError, setBookingError] = useState(null);
 
-  // Patient & Staff Auth token states
-  const [patientToken, setPatientToken] = useState('');
-  const [staffToken, setStaffToken] = useState('');
   const [myAppointments, setMyAppointments] = useState([]);
-  const [viewTab, setViewTab] = useState('discover'); // 'discover' | 'my_appointments' | 'reception'
 
-  // Reception Dashboard State (Phase 07 & 08)
+  // Reception State
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [selectedStaffPatient, setSelectedStaffPatient] = useState(null);
   const [newPatientForm, setNewPatientForm] = useState({ fullName: '', phone: '', gender: 'MALE' });
   const [receptionDoctorId, setReceptionDoctorId] = useState('');
   const [allocatedTokenCard, setAllocatedTokenCard] = useState(null);
-  const [todayQueue, setTodayQueue] = useState([]);
   const [waitingEntries, setWaitingEntries] = useState([]);
   const [activeEntries, setActiveEntries] = useState([]);
   const [skippedEntries, setSkippedEntries] = useState([]);
   const [doctorQueueStatus, setDoctorQueueStatus] = useState({ isQueuePaused: false, queuePausedAt: null, queuePauseReason: null });
   const [opLoading, setOpLoading] = useState(false);
   const [receptionMessage, setReceptionMessage] = useState(null);
+
+  // Live Queue & Public Display State
+  const [liveQueueData, setLiveQueueData] = useState(null);
+  const [publicDisplayData, setPublicDisplayData] = useState(null);
+  const [publicClinicId, setPublicClinicId] = useState('');
+
+  // Rating Modal State
+  const [ratingModalEntry, setRatingModalEntry] = useState(null);
+  const [patientScore, setPatientScore] = useState(5);
+  const [patientReview, setPatientReview] = useState('');
+
+  // Billing State
+  const [patientInvoices, setPatientInvoices] = useState([]);
+  const [staffBillingData, setStaffBillingData] = useState(null);
+  const [analyticsData, setAnalyticsData] = useState(null);
 
   // Load Specialties & Doctors
   useEffect(() => {
@@ -107,30 +317,9 @@ export default function App() {
     });
   }, []);
 
-  const handleGetLocation = () => {
-    if (!navigator.geolocation) {
-      setLocStatus('Geolocation is not supported by your browser');
-      return;
-    }
-    setLocStatus('Acquiring location...');
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        setCoords({ latitude: lat, longitude: lng });
-        setLocStatus(`Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-        setSort('nearest');
-      },
-      (err) => {
-        setLocStatus(`Location denied or unavailable (${err.message}). Showing all locations.`);
-      }
-    );
-  };
-
   const loadDiscovery = async () => {
     setLoading(true);
     setError(null);
-
     const params = {
       specialtyId: selectedSpecialty,
       sort,
@@ -140,12 +329,10 @@ export default function App() {
       doctorGender,
       radiusKm,
     };
-
     if (coords) {
       params.latitude = coords.latitude;
       params.longitude = coords.longitude;
     }
-
     const res = await discoverDoctors(params);
     if (res.ok && res.data.doctors) {
       setDoctors(res.data.doctors);
@@ -196,18 +383,16 @@ export default function App() {
 
   const handleConfirmBooking = async () => {
     if (!patientToken) {
-      alert('Please paste a valid Patient JWT token in the drawer above.');
+      setShowAuthModal(true);
       return;
     }
     if (!bookingDoctor || !selectedSlot || !selectedDate) return;
-
     setBookingError(null);
     const bookingBody = {
       doctorId: bookingDoctor._id,
       appointmentDate: selectedDate,
       timeSlot: selectedSlot,
     };
-
     const res = await createAppointment(bookingBody, patientToken);
     if (res.ok && res.data.success) {
       setBookingSuccess(res.data.appointment);
@@ -239,7 +424,7 @@ export default function App() {
     }
   };
 
-  // Staff Patient Search (Phase 07)
+  // Staff Patient Search
   const handleStaffPatientSearch = async () => {
     if (!staffToken || !searchQuery) return;
     setReceptionMessage(null);
@@ -248,1028 +433,507 @@ export default function App() {
     const res = await searchStaffPatients(searchBody, staffToken);
     if (res.ok && res.data.patients) {
       setSearchResults(res.data.patients);
-    } else {
-      setSearchResults([]);
-      setReceptionMessage(res.data?.message || 'No patients found');
     }
   };
 
-  // Staff Create Walk-In Patient (Phase 07)
+  const handleSelectStaffPatient = (p) => {
+    setSelectedStaffPatient(p);
+    setSearchResults([]);
+  };
+
   const handleCreateWalkInPatient = async () => {
     if (!staffToken || !newPatientForm.fullName || !newPatientForm.phone) return;
-    setReceptionMessage(null);
     const res = await createWalkInPatient(newPatientForm, staffToken);
     if (res.ok && res.data.patient) {
       setSelectedStaffPatient(res.data.patient);
       setNewPatientForm({ fullName: '', phone: '', gender: 'MALE' });
-      setReceptionMessage('Walk-in patient profile created successfully!');
+      setReceptionMessage('✓ Walk-in patient record registered successfully');
     } else {
       setReceptionMessage(`Error: ${res.data?.message || res.error}`);
     }
   };
 
-  // Staff Register Walk-In (Phase 07)
-  const handleRegisterWalkIn = async () => {
+  const handleRegisterWalkInQueue = async () => {
     if (!staffToken || !selectedStaffPatient || !receptionDoctorId) return;
-    setReceptionMessage(null);
-    const body = { doctorId: receptionDoctorId, patientId: selectedStaffPatient._id };
+    const body = {
+      patientId: selectedStaffPatient._id,
+      doctorId: receptionDoctorId,
+      priority: 'NORMAL',
+    };
     const res = await registerWalkIn(body, staffToken);
     if (res.ok && res.data.queueEntry) {
       setAllocatedTokenCard(res.data.queueEntry);
+      setSelectedStaffPatient(null);
       loadTodayStaffQueue();
     } else {
-      setReceptionMessage(`Walk-in error: ${res.data?.message || res.error}`);
+      setReceptionMessage(`Error: ${res.data?.message || res.error}`);
     }
   };
 
-  // Staff Check-In Online Appointment (Phase 07)
-  const handleStaffCheckInAppt = async (apptId) => {
+  const loadTodayStaffQueue = useCallback(async () => {
     if (!staffToken) return;
-    setReceptionMessage(null);
-    const res = await checkInAppointment(apptId, staffToken);
-    if (res.ok && res.data.queueEntry) {
-      setAllocatedTokenCard({
-        ...res.data.queueEntry,
-        patientName: res.data.appointment?.patientId?.fullName || 'Online Patient',
-      });
-      loadTodayStaffQueue();
-    } else {
-      setReceptionMessage(`Check-in error: ${res.data?.message || res.error}`);
-    }
-  };
-
-  // Load Today's Staff Queue (Phase 07 & 08)
-  const loadTodayStaffQueue = async () => {
-    if (!staffToken) return;
-    const res = await fetchTodayStaffQueue(staffToken, { doctorId: receptionDoctorId });
+    const res = await fetchTodayStaffQueue(staffToken);
     if (res.ok && res.data) {
-      setTodayQueue(res.data.queueEntries || []);
-      setWaitingEntries(res.data.waitingEntries || []);
-      setActiveEntries(res.data.activeEntries || []);
-      setSkippedEntries(res.data.skippedEntries || []);
-      if (res.data.doctorQueueStatus) {
-        setDoctorQueueStatus(res.data.doctorQueueStatus);
+      const queue = res.data.queue || [];
+      setWaitingEntries(queue.filter((q) => q.status === 'WAITING'));
+      setActiveEntries(queue.filter((q) => q.status === 'CALLED' || q.status === 'IN_CONSULTATION'));
+      setSkippedEntries(queue.filter((q) => q.status === 'SKIPPED'));
+      if (res.data.doctorStatus) {
+        setDoctorQueueStatus(res.data.doctorStatus);
       }
     }
-  };
+  }, [staffToken]);
 
-  // Phase 08 Queue Engine Handlers
-  const handleCallNextPatient = async () => {
+  useEffect(() => {
+    if (viewTab === 'reception' && staffToken && isTabVisible) {
+      loadTodayStaffQueue();
+      const interval = setInterval(loadTodayStaffQueue, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [viewTab, staffToken, isTabVisible, loadTodayStaffQueue]);
+
+  // Reception Queue Action Handlers
+  const handleCallNext = async () => {
     if (!staffToken || !receptionDoctorId) return;
     setOpLoading(true);
-    setReceptionMessage(null);
     const res = await callNextPatient(receptionDoctorId, staffToken);
-    setOpLoading(false);
-    if (res.ok && res.data.queueEntry) {
-      setReceptionMessage(`Called Patient Token #${res.data.queueEntry.tokenNumber} (${res.data.queueEntry.patientId?.fullName || 'Patient'})`);
+    if (res.ok) {
+      setReceptionMessage(`✓ Successfully called Token #${res.data.queueEntry?.tokenNumber}`);
       loadTodayStaffQueue();
     } else {
-      setReceptionMessage(`Call Next error: ${res.data?.message || res.error}`);
+      setReceptionMessage(`Error: ${res.data?.message || res.error}`);
     }
+    setOpLoading(false);
   };
 
   const handleStartConsultation = async (id) => {
     if (!staffToken) return;
-    setOpLoading(true);
-    setReceptionMessage(null);
     const res = await startConsultation(id, staffToken);
-    setOpLoading(false);
     if (res.ok) {
-      setReceptionMessage('Consultation started.');
+      setReceptionMessage('✓ Consultation started');
       loadTodayStaffQueue();
-    } else {
-      setReceptionMessage(`Start Consultation error: ${res.data?.message || res.error}`);
     }
   };
 
   const handleCompleteConsultation = async (id) => {
     if (!staffToken) return;
-    setOpLoading(true);
-    setReceptionMessage(null);
     const res = await completeConsultation(id, staffToken);
-    setOpLoading(false);
     if (res.ok) {
-      setReceptionMessage('Consultation completed successfully!');
+      setReceptionMessage('✓ Consultation completed');
       loadTodayStaffQueue();
-    } else {
-      setReceptionMessage(`Complete error: ${res.data?.message || res.error}`);
     }
   };
 
-  const handleSkipPatient = async (id, currentStatus) => {
+  const handleSkip = async (id) => {
     if (!staffToken) return;
-    let reason = 'Patient skipped by receptionist';
-    if (currentStatus === 'WAITING') {
-      const inputReason = prompt('Please enter operational reason for skipping WAITING patient:');
-      if (!inputReason || inputReason.trim() === '') return;
-      reason = inputReason.trim();
-    }
-    setOpLoading(true);
-    setReceptionMessage(null);
-    const res = await skipPatient(id, reason, staffToken);
-    setOpLoading(false);
+    const res = await skipPatient(id, 'Patient not present when called', staffToken);
     if (res.ok) {
-      setReceptionMessage('Patient skipped.');
+      setReceptionMessage('✓ Patient skipped');
       loadTodayStaffQueue();
-    } else {
-      setReceptionMessage(`Skip error: ${res.data?.message || res.error}`);
     }
   };
 
-  const handleMarkNoShow = async (id, currentStatus) => {
+  const handleNoShow = async (id) => {
     if (!staffToken) return;
-    let reason = 'Patient marked no-show';
-    if (currentStatus === 'WAITING') {
-      const inputReason = prompt('Please enter reason for marking WAITING patient as NO_SHOW:');
-      if (!inputReason || inputReason.trim() === '') return;
-      reason = inputReason.trim();
-    }
-    setOpLoading(true);
-    setReceptionMessage(null);
-    const res = await markNoShow(id, reason, staffToken);
-    setOpLoading(false);
+    const res = await markNoShow(id, 'No-show after multiple calls', staffToken);
     if (res.ok) {
-      setReceptionMessage('Patient marked as no-show.');
+      setReceptionMessage('✓ Patient marked NO_SHOW');
       loadTodayStaffQueue();
-    } else {
-      setReceptionMessage(`No-show error: ${res.data?.message || res.error}`);
     }
   };
 
-  const handleRejoinPatient = async (id) => {
+  const handleRejoin = async (id) => {
     if (!staffToken) return;
-    setOpLoading(true);
-    setReceptionMessage(null);
     const res = await rejoinPatient(id, staffToken);
-    setOpLoading(false);
-    if (res.ok && res.data.queueEntry) {
-      setReceptionMessage(`Patient rejoined queue with new Token #${res.data.queueEntry.tokenNumber}`);
+    if (res.ok) {
+      setReceptionMessage(`✓ Patient rejoined with new Token #${res.data.queueEntry?.tokenNumber}`);
       loadTodayStaffQueue();
-    } else {
-      setReceptionMessage(`Rejoin error: ${res.data?.message || res.error}`);
     }
   };
 
-  const handleTogglePauseQueue = async () => {
+  const handlePauseQueue = async () => {
     if (!staffToken || !receptionDoctorId) return;
-    setOpLoading(true);
-    setReceptionMessage(null);
-    if (doctorQueueStatus.isQueuePaused) {
-      const res = await resumeQueue(receptionDoctorId, staffToken);
-      setOpLoading(false);
-      if (res.ok) {
-        setReceptionMessage('Doctor queue resumed.');
-        loadTodayStaffQueue();
-      } else {
-        setReceptionMessage(`Resume error: ${res.data?.message || res.error}`);
-      }
-    } else {
-      const reason = prompt('Reason for pausing doctor queue:', 'Doctor on break / Emergency');
-      const res = await pauseQueue(receptionDoctorId, reason || 'Queue paused', staffToken);
-      setOpLoading(false);
-      if (res.ok) {
-        setReceptionMessage('Doctor queue paused.');
-        loadTodayStaffQueue();
-      } else {
-        setReceptionMessage(`Pause error: ${res.data?.message || res.error}`);
-      }
-    }
-  };
-
-  const handleCancelQueueEntry = async (id) => {
-    if (!staffToken) return;
-    const reason = prompt('Reason for cancelling queue entry:', 'Cancelled by receptionist');
-    if (!reason) return;
-    setOpLoading(true);
-    setReceptionMessage(null);
-    const res = await cancelQueueEntry(id, reason, staffToken);
-    setOpLoading(false);
+    const res = await pauseQueue(receptionDoctorId, 'Doctor on lunch break', staffToken);
     if (res.ok) {
-      setReceptionMessage('Queue entry cancelled.');
+      setReceptionMessage('✓ Doctor queue paused');
       loadTodayStaffQueue();
-    } else {
-      setReceptionMessage(`Cancel error: ${res.data?.message || res.error}`);
     }
   };
 
-  // Phase 09 Patient Live Queue State
-  const [liveQueueData, setLiveQueueData] = useState(null);
-  const [liveQueueLoading, setLiveQueueLoading] = useState(false);
-  const [liveQueueError, setLiveQueueError] = useState(null);
-  const [liveQueueLastUpdated, setLiveQueueLastUpdated] = useState(null);
+  const handleResumeQueue = async () => {
+    if (!staffToken || !receptionDoctorId) return;
+    const res = await resumeQueue(receptionDoctorId, staffToken);
+    if (res.ok) {
+      setReceptionMessage('✓ Doctor queue resumed');
+      loadTodayStaffQueue();
+    }
+  };
 
-  const loadPatientLiveQueue = async () => {
+  // Live Queue & Public Polling
+  const loadLiveQueue = useCallback(async () => {
     if (!patientToken) return;
-    setLiveQueueLoading(true);
-    setLiveQueueError(null);
     const res = await getPatientLiveQueue(patientToken);
-    setLiveQueueLoading(false);
-    if (res.ok && res.data?.success) {
+    if (res.ok && res.data) {
       setLiveQueueData(res.data);
-      setLiveQueueLastUpdated(new Date().toLocaleTimeString());
-    } else {
-      setLiveQueueError(res.data?.message || res.error || 'Failed to load live queue status');
-    }
-  };
-
-  useEffect(() => {
-    if (viewTab === 'reception' && staffToken) {
-      loadTodayStaffQueue();
-    }
-  }, [viewTab, staffToken, receptionDoctorId]);
-
-  useEffect(() => {
-    if (viewTab === 'live_queue' && patientToken) {
-      loadPatientLiveQueue();
-
-      let intervalId = null;
-      const startPolling = () => {
-        if (!intervalId && !document.hidden) {
-          intervalId = setInterval(() => {
-            loadPatientLiveQueue();
-          }, 10000);
-        }
-      };
-
-      const stopPolling = () => {
-        if (intervalId) {
-          clearInterval(intervalId);
-          intervalId = null;
-        }
-      };
-
-      startPolling();
-
-      const handleVisibilityChange = () => {
-        if (document.hidden) {
-          stopPolling();
-        } else {
-          loadPatientLiveQueue();
-          startPolling();
-        }
-      };
-
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-
-      return () => {
-        stopPolling();
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-      };
-    }
-  }, [viewTab, patientToken]);
-
-  // Phase 10 Public Display State
-  const [publicClinicId, setPublicClinicId] = useState('');
-  const [publicDoctorId, setPublicDoctorId] = useState('');
-  const [publicDisplayData, setPublicDisplayData] = useState(null);
-  const [publicDisplayLoading, setPublicDisplayLoading] = useState(false);
-  const [publicDisplayError, setPublicDisplayError] = useState(null);
-  const [publicLastUpdated, setPublicLastUpdated] = useState(null);
-
-  const loadPublicQueueDisplay = async () => {
-    if (!publicClinicId) return;
-    setPublicDisplayLoading(true);
-    setPublicDisplayError(null);
-    const res = await fetchPublicQueueDisplay(publicClinicId, publicDoctorId || null);
-    setPublicDisplayLoading(false);
-    if (res.ok && res.data?.success) {
-      setPublicDisplayData(res.data);
-      setPublicLastUpdated(new Date().toLocaleTimeString());
-    } else {
-      setPublicDisplayError(res.data?.message || res.error || 'Failed to load public queue display');
-    }
-  };
-
-  useEffect(() => {
-    if (viewTab === 'public_display' && publicClinicId) {
-      loadPublicQueueDisplay();
-
-      let intervalId = setInterval(() => {
-        loadPublicQueueDisplay();
-      }, 10000);
-
-      return () => clearInterval(intervalId);
-    }
-  }, [viewTab, publicClinicId, publicDoctorId]);
-
-  // Phase 10 Rating Submission State
-  const [ratingModalEntry, setRatingModalEntry] = useState(null);
-  const [ratingScore, setRatingScore] = useState(5);
-  const [ratingText, setRatingText] = useState('');
-  const [ratingMsg, setRatingMsg] = useState(null);
-  const [ratingSubmitting, setRatingSubmitting] = useState(false);
-
-  const handleRatingSubmit = async (e) => {
-    e.preventDefault();
-    if (!patientToken || !ratingModalEntry) return;
-    setRatingSubmitting(true);
-    setRatingMsg(null);
-    const res = await submitPatientRating(ratingModalEntry._id || ratingModalEntry.queueEntryId, ratingScore, ratingText, patientToken);
-    setRatingSubmitting(false);
-    if (res.ok) {
-      setRatingMsg('Rating submitted successfully! Thank you.');
-      setTimeout(() => setRatingModalEntry(null), 1500);
-    } else {
-      setRatingMsg(`Error: ${res.data?.message || res.error}`);
-    }
-  };
-
-  // Phase 10 Notifications State
-  const [patientNotifs, setPatientNotifs] = useState([]);
-  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
-  const [showNotifDrawer, setShowNotifDrawer] = useState(false);
-
-  const loadPatientNotifs = async () => {
-    if (!patientToken) return;
-    const res = await fetchPatientNotifications(patientToken);
-    if (res.ok && res.data?.success) {
-      setPatientNotifs(res.data.notifications || []);
-      setUnreadNotifCount(res.data.unreadCount || 0);
-    }
-  };
-
-  const handleMarkNotifRead = async (id) => {
-    if (!patientToken) return;
-    const res = await markNotificationRead(id, patientToken);
-    if (res.ok) {
-      loadPatientNotifs();
-    }
-  };
-
-  useEffect(() => {
-    if (patientToken) {
-      loadPatientNotifs();
     }
   }, [patientToken]);
 
+  useEffect(() => {
+    if (viewTab === 'live_queue' && patientToken && isTabVisible) {
+      loadLiveQueue();
+      const interval = setInterval(loadLiveQueue, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [viewTab, patientToken, isTabVisible, loadLiveQueue]);
+
+  const loadPublicDisplay = useCallback(async () => {
+    if (!publicClinicId) return;
+    const res = await fetchPublicQueueDisplay(publicClinicId);
+    if (res.ok && res.data) {
+      setPublicDisplayData(res.data);
+    }
+  }, [publicClinicId]);
+
+  useEffect(() => {
+    if (viewTab === 'public_display' && publicClinicId && isTabVisible) {
+      loadPublicDisplay();
+      const interval = setInterval(loadPublicDisplay, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [viewTab, publicClinicId, isTabVisible, loadPublicDisplay]);
+
+  // Billing Handlers
+  const loadPatientInvoices = useCallback(async () => {
+    if (!patientToken) return;
+    const res = await fetchPatientInvoices(patientToken);
+    if (res.ok && res.data) {
+      setPatientInvoices(res.data.invoices || []);
+    }
+  }, [patientToken]);
+
+  useEffect(() => {
+    if (viewTab === 'billing' && patientToken) {
+      loadPatientInvoices();
+    }
+  }, [viewTab, patientToken, loadPatientInvoices]);
+
+  const handlePayInvoice = async (invoiceId) => {
+    if (!patientToken) return;
+    const res = await initiatePatientPayment({ invoiceId, paymentMethod: 'UPI' }, patientToken);
+    if (res.ok) {
+      alert(`✓ Payment processed successfully! Transaction: ${res.data.payment?.transactionReference}`);
+      loadPatientInvoices();
+    } else {
+      alert(`Payment failed: ${res.data?.message || res.error}`);
+    }
+  };
+
+  // Auth Modal Handler
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError(null);
+
+    if (authMode === 'login') {
+      const res = await loginUser({ email: authForm.email, password: authForm.password });
+      if (res.ok && res.data?.token) {
+        setAuthSession({ user: res.data.user, token: res.data.token });
+        setShowAuthModal(false);
+      } else {
+        setAuthError(res.data?.message || res.error || 'Login failed');
+      }
+    } else {
+      const res = await registerUser(authForm);
+      if (res.ok && res.data?.token) {
+        setAuthSession({ user: res.data.user, token: res.data.token });
+        setShowAuthModal(false);
+      } else {
+        setAuthError(res.data?.message || res.error || 'Registration failed');
+      }
+    }
+    setAuthLoading(false);
+  };
+
+  const handleLogout = () => {
+    setAuthSession(null);
+    setPatientToken('');
+    setStaffToken('');
+    setDoctorToken('');
+    setAdminToken('');
+    setViewTab('discover');
+  };
+
   return (
     <div className="container">
-      <header className="header">
-        <h1 className="title">QFlow Healthcare</h1>
-        <p className="subtitle">Phase 07 — Walk-In Registration & Check-In Token Allocation</p>
-        <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
-          <button
-            className={`btn ${viewTab === 'discover' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => { setViewTab('discover'); setBookingDoctor(null); setBookingSuccess(null); }}
-          >
-            🔍 Patient Discovery
-          </button>
-          <button
-            className={`btn ${viewTab === 'my_appointments' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setViewTab('my_appointments')}
-          >
-            📅 My Appointments
-          </button>
-          <button
-            className={`btn ${viewTab === 'live_queue' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setViewTab('live_queue')}
-          >
-            📱 Patient Live Queue
-          </button>
-          <button
-            className={`btn ${viewTab === 'public_display' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setViewTab('public_display')}
-          >
+      {/* Top Application Header */}
+      <header className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+        <div>
+          <h1 className="title" style={{ margin: 0, textAlign: 'left', fontSize: '1.75rem' }}>QFlow</h1>
+          <div className="subtitle" style={{ textAlign: 'left' }}>Healthcare Virtual Queue & Clinic Management</div>
+        </div>
+
+        {/* User Identity & Navigation Action Bar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          {/* Notification Bell (Patient Only) */}
+          {currentRole === 'PATIENT' && (
+            <button
+              className="btn btn-secondary"
+              style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+              onClick={() => setShowNotificationDrawer(true)}
+            >
+              🔔 Notifications
+              {unreadCount > 0 && (
+                <span style={{ background: '#ef4444', color: '#fff', fontSize: '0.75rem', padding: '0.1rem 0.4rem', borderRadius: '999px', fontWeight: 'bold' }}>
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {authSession?.user ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(30, 41, 59, 0.6)', padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <div style={{ textAlign: 'right', fontSize: '0.8rem' }}>
+                <div style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>{authSession.user.name || 'User'}</div>
+                <div style={{ color: 'var(--primary)', fontSize: '0.75rem', fontWeight: 600 }}>{currentRole}</div>
+              </div>
+              <button className="btn btn-secondary" style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }} onClick={handleLogout}>
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <button className="btn btn-primary" onClick={() => { setAuthMode('login'); setShowAuthModal(true); }}>
+              🔑 Sign In / Register
+            </button>
+          )}
+        </div>
+
+        {/* Role-Based Navigation Bar */}
+        <div style={{ width: '100%', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+          {/* Patient Views */}
+          {(currentRole === 'GUEST' || currentRole === 'PATIENT') && (
+            <button className={`btn ${viewTab === 'discover' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('discover')}>
+              🔍 Find Doctors
+            </button>
+          )}
+
+          {currentRole === 'PATIENT' && (
+            <>
+              <button className={`btn ${viewTab === 'my_appointments' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('my_appointments')}>
+                📅 My Appointments
+              </button>
+              <button className={`btn ${viewTab === 'live_queue' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('live_queue')}>
+                🎫 My Live Queue
+              </button>
+              <button className={`btn ${viewTab === 'billing' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('billing')}>
+                💳 Invoices & Payments
+              </button>
+            </>
+          )}
+
+          {/* Doctor View */}
+          {currentRole === 'DOCTOR' && (
+            <button className={`btn ${viewTab === 'doctor_cockpit' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('doctor_cockpit')}>
+              🩺 Doctor Cockpit
+            </button>
+          )}
+
+          {/* Staff & Admin Views */}
+          {(currentRole === 'STAFF' || currentRole === 'ADMIN') && (
+            <>
+              <button className={`btn ${viewTab === 'reception' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('reception')}>
+                🏥 Reception Desk
+              </button>
+              <button className={`btn ${viewTab === 'billing' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('billing')}>
+                💳 Billing & Refunds
+              </button>
+            </>
+          )}
+
+          {/* Analytics & Intelligence Views */}
+          {(currentRole === 'STAFF' || currentRole === 'DOCTOR' || currentRole === 'ADMIN') && (
+            <>
+              <button className={`btn ${viewTab === 'analytics' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('analytics')}>
+                📊 Analytics
+              </button>
+              <button className={`btn ${viewTab === 'intelligence' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('intelligence')}>
+                🧠 AI Intelligence
+              </button>
+            </>
+          )}
+
+          {/* Public Kiosk Display (All Roles & Guest) */}
+          <button className={`btn ${viewTab === 'public_display' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('public_display')}>
             📺 Public Display
-          </button>
-          <button
-            className={`btn ${viewTab === 'reception' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setViewTab('reception')}
-          >
-            🏥 Staff Reception Desk
-          </button>
-          <button
-            className={`btn ${viewTab === 'billing' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setViewTab('billing')}
-          >
-            💳 Billing & Invoices
-          </button>
-          <button
-            className={`btn ${viewTab === 'analytics' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setViewTab('analytics')}
-          >
-            📊 Analytics Dashboard
-          </button>
-          <button
-            className={`btn ${viewTab === 'intelligence' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setViewTab('intelligence')}
-          >
-            🧠 AI Intelligence
           </button>
         </div>
       </header>
 
-      {/* Auth Token Drawer */}
-      <div style={{ background: '#090d16', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-        <div>
-          <span style={{ color: 'var(--text-muted)' }}>Patient JWT Token: </span>
-          <input
-            type="text"
-            className="filter-input"
-            placeholder="Paste Patient JWT Token"
-            value={patientToken}
-            onChange={(e) => setPatientToken(e.target.value.trim())}
-            style={{ width: '90%', marginTop: '0.25rem' }}
-          />
-        </div>
-        <div>
-          <span style={{ color: 'var(--text-muted)' }}>Staff/Admin JWT Token: </span>
-          <input
-            type="text"
-            className="filter-input"
-            placeholder="Paste Staff JWT Token"
-            value={staffToken}
-            onChange={(e) => setStaffToken(e.target.value.trim())}
-            style={{ width: '90%', marginTop: '0.25rem' }}
-          />
-        </div>
-      </div>
-
-      {/* VIEW: Staff Reception Desk (Phase 07 & 08) */}
-      {viewTab === 'reception' ? (
-        <div className="card">
-          <h2>🏥 Reception Desk — Operational Queue Management</h2>
-          {!staffToken ? (
-            <div className="empty-state">Please paste a valid Staff/Admin/Doctor JWT token in the drawer above.</div>
-          ) : (
+      {/* VIEW: Doctor Examination Cockpit (Phase 13) */}
+      {viewTab === 'doctor_cockpit' && (
+        <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '1rem', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
             <div>
-              {receptionMessage && (
-                <div style={{ background: '#1c1917', border: '1px solid var(--primary)', padding: '0.75rem', borderRadius: '8px', color: 'var(--text-main)', marginBottom: '1rem' }}>
-                  {receptionMessage}
-                </div>
-              )}
-
-              {/* Token Allocation Confirmation Card */}
-              {allocatedTokenCard && (
-                <div style={{ background: '#064e3b', border: '1px solid var(--success-text)', padding: '1rem', borderRadius: '8px', marginBottom: '1.25rem', textAlign: 'center' }}>
-                  <h3 style={{ color: '#6ee7b7', margin: 0 }}>✓ QUEUE TOKEN ALLOCATED</h3>
-                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#ffffff', margin: '0.5rem 0' }}>
-                    Token #{allocatedTokenCard.tokenNumber}
-                  </div>
-                  <div style={{ fontSize: '0.9rem', color: '#a7f3d0' }}>
-                    Patient: {allocatedTokenCard.patientName || 'Patient'} | Source: {allocatedTokenCard.source} | Date: {allocatedTokenCard.queueDate}
-                  </div>
-                  <button className="btn btn-secondary" style={{ marginTop: '0.75rem', fontSize: '0.8rem' }} onClick={() => setAllocatedTokenCard(null)}>
-                    Dismiss Token Card
-                  </button>
-                </div>
-              )}
-
-              {/* Queue Controls Header & Doctor Selector */}
-              <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <label className="filter-label" style={{ fontWeight: 'bold' }}>Doctor: </label>
-                  <select
-                    className="filter-select"
-                    value={receptionDoctorId}
-                    onChange={(e) => setReceptionDoctorId(e.target.value)}
-                    style={{ width: '260px' }}
-                  >
-                    {doctors.map((d) => (
-                      <option key={d._id} value={d._id}>{d.fullName} ({d.specialty?.name || 'Doctor'})</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                  <button
-                    className="btn btn-primary"
-                    style={{ padding: '0.75rem 1.5rem', fontSize: '1rem', fontWeight: 'bold', background: doctorQueueStatus.isQueuePaused || activeEntries.length > 0 ? '#4b5563' : 'var(--primary)' }}
-                    disabled={opLoading || doctorQueueStatus.isQueuePaused || activeEntries.length > 0}
-                    onClick={handleCallNextPatient}
-                  >
-                    📢 CALL NEXT PATIENT
-                  </button>
-
-                  <button
-                    className={`btn ${doctorQueueStatus.isQueuePaused ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ background: doctorQueueStatus.isQueuePaused ? '#dc2626' : undefined }}
-                    disabled={opLoading}
-                    onClick={handleTogglePauseQueue}
-                  >
-                    {doctorQueueStatus.isQueuePaused ? '▶ Resume Queue' : '⏸ Pause Queue'}
-                  </button>
-                </div>
+              <h2 style={{ fontSize: '1.4rem', color: 'var(--primary)', margin: 0 }}>🩺 Doctor Examination Cockpit</h2>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                Live exam room workflow, consultation duration metrics & queue controls
               </div>
-
-              {/* Queue Paused Warning Banner */}
-              {doctorQueueStatus.isQueuePaused && (
-                <div style={{ background: '#7f1d1d', border: '1px solid #ef4444', color: '#fca5a5', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1.25rem' }}>
-                  <strong>⏸ QUEUE IS CURRENTLY PAUSED TODAY:</strong> {doctorQueueStatus.queuePauseReason || 'No reason specified'}
-                </div>
-              )}
-
-              {/* Current Active Patient Card (CALLED / IN_CONSULTATION) */}
-              {activeEntries.length > 0 && (
-                <div style={{ background: '#1e1b4b', border: '2px solid #6366f1', padding: '1.25rem', borderRadius: '8px', marginBottom: '1.25rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                    <h3 style={{ color: '#a5b4fc', margin: 0 }}>🚨 CURRENT ACTIVE PATIENT IN ROOM</h3>
-                    <span className="status-badge" style={{ background: activeEntries[0].status === 'IN_CONSULTATION' ? '#059669' : '#d97706', color: '#fff', fontSize: '0.9rem', padding: '0.3rem 0.8rem' }}>
-                      {activeEntries[0].status}
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <div style={{ fontSize: '2rem', fontWeight: 'bold', color: '#ffffff' }}>
-                        Token #{activeEntries[0].tokenNumber}
-                      </div>
-                      <div style={{ fontSize: '1.1rem', color: '#c7d2fe', marginTop: '0.25rem' }}>
-                        {activeEntries[0].patientId?.fullName || 'Patient'} ({activeEntries[0].patientId?.phone || 'N/A'})
-                      </div>
-                      <div style={{ fontSize: '0.85rem', color: '#93c5fd', marginTop: '0.25rem' }}>
-                        Source: {activeEntries[0].source} | Slot: {activeEntries[0].appointmentId?.timeSlot ? `${activeEntries[0].appointmentId.timeSlot.startTime}-${activeEntries[0].appointmentId.timeSlot.endTime}` : 'Walk-In'}
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      {activeEntries[0].status === 'CALLED' && (
-                        <>
-                          <button className="btn btn-primary" style={{ background: '#059669' }} disabled={opLoading} onClick={() => handleStartConsultation(activeEntries[0]._id)}>
-                            ▶ Start Consultation
-                          </button>
-                          <button className="btn btn-secondary" disabled={opLoading} onClick={() => handleSkipPatient(activeEntries[0]._id, 'CALLED')}>
-                            ⏩ Skip
-                          </button>
-                          <button className="btn btn-secondary" disabled={opLoading} onClick={() => handleMarkNoShow(activeEntries[0]._id, 'CALLED')}>
-                            🚫 No-Show
-                          </button>
-                          <button className="btn btn-secondary" disabled={opLoading} onClick={() => handleCancelQueueEntry(activeEntries[0]._id)}>
-                            ✕ Cancel
-                          </button>
-                        </>
-                      )}
-
-                      {activeEntries[0].status === 'IN_CONSULTATION' && (
-                        <button className="btn btn-primary" style={{ background: '#10b981', padding: '0.75rem 1.5rem', fontSize: '1rem' }} disabled={opLoading} onClick={() => handleCompleteConsultation(activeEntries[0]._id)}>
-                          ✓ COMPLETE CONSULTATION
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem', marginBottom: '1.25rem' }}>
-                {/* Left Column: Patient Search, Walk-In Creation & Check-In */}
-                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                  <h3 style={{ color: 'var(--primary)', marginBottom: '0.75rem' }}>1. Search & Check-In / Walk-In</h3>
-                  
-                  <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                    <input
-                      type="text"
-                      className="filter-input"
-                      placeholder="Phone or Name search..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      style={{ flex: 1 }}
-                    />
-                    <button className="btn btn-primary" onClick={handleStaffPatientSearch}>Search</button>
-                  </div>
-
-                  {searchResults.length > 0 && (
-                    <div style={{ background: '#111827', padding: '0.5rem', borderRadius: '6px', marginBottom: '1rem', maxHeight: '150px', overflowY: 'auto' }}>
-                      <strong style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Search Results:</strong>
-                      {searchResults.map((p) => (
-                        <div
-                          key={p._id}
-                          style={{ padding: '0.4rem', borderBottom: '1px solid #1f2937', cursor: 'pointer', background: selectedStaffPatient?._id === p._id ? '#1e293b' : 'transparent' }}
-                          onClick={() => setSelectedStaffPatient(p)}
-                        >
-                          {p.fullName} ({p.phone}) — {p.gender}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Create Walk-In Patient Sub-Form */}
-                  <div style={{ borderTop: '1px solid #1f2937', paddingTop: '0.75rem', marginTop: '0.75rem' }}>
-                    <h4 style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Create New Walk-In Patient Profile:</h4>
-                    <input
-                      type="text"
-                      className="filter-input"
-                      placeholder="Full Name"
-                      value={newPatientForm.fullName}
-                      onChange={(e) => setNewPatientForm({ ...newPatientForm, fullName: e.target.value })}
-                      style={{ width: '100%', marginBottom: '0.4rem' }}
-                    />
-                    <input
-                      type="text"
-                      className="filter-input"
-                      placeholder="Phone Number"
-                      value={newPatientForm.phone}
-                      onChange={(e) => setNewPatientForm({ ...newPatientForm, phone: e.target.value })}
-                      style={{ width: '100%', marginBottom: '0.4rem' }}
-                    />
-                    <button className="btn btn-secondary" style={{ width: '100%', fontSize: '0.8rem' }} onClick={handleCreateWalkInPatient}>
-                      + Create Patient Profile
-                    </button>
-                  </div>
-
-                  {/* Selected Patient CTA */}
-                  {selectedStaffPatient && (
-                    <div style={{ marginTop: '1rem', background: '#1e293b', padding: '0.75rem', borderRadius: '6px' }}>
-                      <strong>Selected Patient:</strong> {selectedStaffPatient.fullName} ({selectedStaffPatient.phone})
-                      <button
-                        className="btn btn-primary"
-                        style={{ width: '100%', marginTop: '0.5rem' }}
-                        disabled={opLoading}
-                        onClick={handleRegisterWalkIn}
-                      >
-                        REGISTER WALK-IN (ALLOCATE TOKEN)
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Right Column: HYBRID Ordered WAITING Queue Table */}
-                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                  <h3 style={{ color: 'var(--primary)', marginBottom: '0.75rem' }}>2. Live Ordered WAITING Queue ({waitingEntries.length})</h3>
-                  {waitingEntries.length === 0 ? (
-                    <div className="empty-state">No patients currently waiting in queue.</div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '350px', overflowY: 'auto' }}>
-                      {waitingEntries.map((q, idx) => (
-                        <div key={q._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1e293b', padding: '0.6rem 0.8rem', borderRadius: '6px' }}>
-                          <div>
-                            <span style={{ fontSize: '1rem', fontWeight: 'bold', color: '#6ee7b7', marginRight: '0.5rem' }}>
-                              #{q.tokenNumber}
-                            </span>
-                            <strong style={{ fontSize: '0.9rem' }}>{q.patientId?.fullName || 'Patient'}</strong>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                              Source: {q.source} | Eff: {Math.floor(q.effectiveSlotMinutes / 60).toString().padStart(2, '0')}:{(q.effectiveSlotMinutes % 60).toString().padStart(2, '0')}
-                            </div>
-                          </div>
-
-                          <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
-                            <button className="btn btn-secondary" style={{ padding: '0.2rem 0.4rem', fontSize: '0.7rem' }} disabled={opLoading} onClick={() => handleSkipPatient(q._id, 'WAITING')}>
-                              Skip
-                            </button>
-                            <button className="btn btn-secondary" style={{ padding: '0.2rem 0.4rem', fontSize: '0.7rem' }} disabled={opLoading} onClick={() => handleMarkNoShow(q._id, 'WAITING')}>
-                              No-Show
-                            </button>
-                            <button className="btn btn-secondary" style={{ padding: '0.2rem 0.4rem', fontSize: '0.7rem' }} disabled={opLoading} onClick={() => handleCancelQueueEntry(q._id)}>
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Bottom Section: SKIPPED Patients Section */}
-              {skippedEntries.length > 0 && (
-                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid #ca8a04', marginTop: '1rem' }}>
-                  <h3 style={{ color: '#fde047', marginBottom: '0.75rem' }}>⏩ Skipped Patients ({skippedEntries.length})</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.75rem' }}>
-                    {skippedEntries.map((s) => (
-                      <div key={s._id} style={{ background: '#1e293b', padding: '0.75rem', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <span style={{ fontWeight: 'bold', color: '#fde047' }}>Token #{s.tokenNumber}</span> — {s.patientId?.fullName || 'Patient'}
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                            Rejoins: {s.rejoinCount || 0} / 3 | Source: {s.source}
-                          </div>
-                        </div>
-                        <button
-                          className="btn btn-primary"
-                          style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', background: s.rejoinCount >= 3 ? '#6b7280' : '#d97706' }}
-                          disabled={opLoading || s.rejoinCount >= 3}
-                          onClick={() => handleRejoinPatient(s._id)}
-                        >
-                          {s.rejoinCount >= 3 ? 'Max Rejoined' : '↩ Rejoin'}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
-          )}
-        </div>
-      ) : bookingSuccess ? (
-        /* VIEW: Stage 3 Booking Confirmation Screen */
-        <div className="card">
-          <h2 style={{ color: 'var(--success-text)', marginBottom: '0.5rem' }}>✓ Appointment Booked Successfully!</h2>
-          <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>Your online appointment has been confirmed in `BOOKED` status.</p>
 
-          <div className="doctor-card-details" style={{ gridTemplateColumns: '1fr', gap: '0.5rem', background: '#090d16', padding: '1rem', borderRadius: '8px' }}>
-            <div><strong>Appointment ID:</strong> {bookingSuccess._id}</div>
-            <div><strong>Date:</strong> {bookingSuccess.appointmentDate}</div>
-            <div><strong>Time Slot:</strong> {bookingSuccess.timeSlot?.startTime} - {bookingSuccess.timeSlot?.endTime}</div>
-            <div><strong>Status:</strong> <span className="status-badge status-connected">BOOKED</span></div>
-            <div><strong>Instructions:</strong> Please arrive at the clinic 15 minutes before your time slot for Staff Check-In.</div>
-          </div>
-
-          <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={() => setBookingSuccess(null)}>
-            Back to Patient Discovery
-          </button>
-        </div>
-      ) : bookingDoctor ? (
-        /* VIEW: Stage 3 Booking Page */
-        <div className="card">
-          <button className="btn btn-secondary" style={{ marginBottom: '1rem' }} onClick={() => setBookingDoctor(null)}>
-            ← Back to Profile
-          </button>
-
-          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem' }}>
-            <img
-              src={bookingDoctor.photoUrl || 'https://via.placeholder.com/150'}
-              alt={bookingDoctor.fullName}
-              style={{ width: '60px', height: '60px', borderRadius: '50%', objectFit: 'cover' }}
-            />
-            <div>
-              <h3>{bookingDoctor.fullName}</h3>
-              <p style={{ color: 'var(--primary)', fontSize: '0.85rem' }}>{bookingDoctor.specialty?.name}</p>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>📍 {bookingDoctor.clinic?.name}</p>
-            </div>
-          </div>
-
-          {bookingError && <div style={{ color: 'var(--error-text)', marginBottom: '1rem' }}>{bookingError}</div>}
-
-          {/* Date Selector */}
-          <div style={{ marginBottom: '1rem' }}>
-            <label className="filter-label">Select Date: </label>
-            <input
-              type="date"
-              className="filter-input"
-              value={selectedDate}
-              min={new Date().toISOString().split('T')[0]}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              style={{ marginLeft: '0.5rem' }}
-            />
-          </div>
-
-          {/* Time Slots Grid */}
-          <h4 style={{ color: 'var(--primary)', marginBottom: '0.5rem' }}>Available Time Slots</h4>
-          {loadingAvail ? (
-            <div className="empty-state">Loading availability...</div>
-          ) : !availability || availability.availableSlots.length === 0 ? (
-            <div className="empty-state">No available slots for selected date.</div>
-          ) : (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1.25rem' }}>
-              {availability.availableSlots.map((slot, idx) => (
+            {/* Live Operational Status Selector */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Status:</span>
+              {['AVAILABLE', 'BUSY', 'ON_BREAK', 'UNAVAILABLE', 'OFFLINE'].map((st) => (
                 <button
-                  key={idx}
-                  className={`category-chip ${selectedSlot?.startTime === slot.startTime ? 'active' : ''}`}
-                  onClick={() => setSelectedSlot(slot)}
+                  key={st}
+                  disabled={doctorOpLoading}
+                  className={`btn ${doctorLiveStatus === st ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: '0.75rem', padding: '0.35rem 0.6rem' }}
+                  onClick={() => handleDoctorStatusUpdate(st)}
                 >
-                  {slot.startTime} - {slot.endTime}
+                  {st}
                 </button>
               ))}
             </div>
-          )}
-
-          {/* Summary & Confirm */}
-          {selectedSlot && (
-            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', marginBottom: '1rem' }}>
-              <h4>Booking Summary</h4>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                Date: {selectedDate} | Time: {selectedSlot.startTime} - {selectedSlot.endTime} | Fee: ₹{bookingDoctor.consultationFee || 0}
-              </p>
-            </div>
-          )}
-
-          <button
-            className="btn btn-primary"
-            style={{ width: '100%', padding: '0.85rem' }}
-            disabled={!selectedSlot}
-            onClick={handleConfirmBooking}
-          >
-            CONFIRM APPOINTMENT
-          </button>
-        </div>
-      ) : viewTab === 'my_appointments' ? (
-        /* VIEW: Patient Appointments Dashboard */
-        <div className="card">
-          <h2>My Appointments</h2>
-          {!patientToken ? (
-            <div className="empty-state">Please paste a valid Patient JWT token above to view your appointments.</div>
-          ) : myAppointments.length === 0 ? (
-            <div className="empty-state">No appointments found.</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
-              {myAppointments.map((appt) => (
-                <div key={appt._id} style={{ background: '#090d16', border: '1px solid var(--border-color)', padding: '1rem', borderRadius: '8px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <strong>{appt.doctorId?.fullName || 'Doctor'}</strong>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>📍 {appt.clinicId?.name}</div>
-                      <div style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                        📅 {appt.appointmentDate} @ {appt.timeSlot?.startTime} - {appt.timeSlot?.endTime}
-                      </div>
-                    </div>
-                    <div>
-                      <span className={`status-badge ${appt.status === 'BOOKED' ? 'status-connected' : 'status-warning'}`}>
-                        {appt.status}
-                      </span>
-                      {appt.status === 'BOOKED' && (
-                        <button
-                          className="btn btn-secondary"
-                          style={{ display: 'block', marginTop: '0.5rem', fontSize: '0.75rem' }}
-                          onClick={() => handleCancelAppointment(appt._id)}
-                        >
-                          Cancel
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : viewTab === 'live_queue' ? (
-        /* VIEW: Patient Live Queue (Phase 09) */
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h2>📱 Live Queue Experience</h2>
-            <button className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.4rem 0.75rem' }} onClick={loadPatientLiveQueue}>
-              🔄 Refresh {liveQueueLoading && '...'}
-            </button>
           </div>
 
-          {!patientToken ? (
-            <div className="empty-state">Please paste a valid Patient JWT token in the drawer above to view your live queue.</div>
-          ) : liveQueueLoading && !liveQueueData ? (
-            <div style={{ textAlign: 'center', padding: '2rem' }}>
-              <div className="spinner" style={{ margin: '0 auto 1rem' }}></div>
-              <p style={{ color: 'var(--text-muted)' }}>Loading live queue progress...</p>
+          {doctorMessage && (
+            <div style={{ background: '#1c1917', border: '1px solid var(--primary)', padding: '0.75rem', borderRadius: '8px', color: 'var(--text-main)', marginBottom: '1rem' }}>
+              {doctorMessage}
             </div>
-          ) : liveQueueError ? (
-            <div>
-              <div style={{ color: '#ef4444', padding: '1rem', border: '1px solid #7f1d1d', borderRadius: '8px', background: '#180a0a', marginBottom: '1rem' }}>
-                ⚠️ {liveQueueError}
+          )}
+
+          {/* Top Operational Metrics Bar */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Today Completed</div>
+              <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: 'var(--primary)' }}>
+                {doctorIntel?.todayCompletedCount ?? 0} Patients
               </div>
-              <button className="btn btn-secondary" onClick={loadPatientLiveQueue}>🔄 Retry Now</button>
             </div>
-          ) : !liveQueueData || !liveQueueData.hasActiveEntry ? (
-            <div className="empty-state" style={{ padding: '2rem' }}>
-              ℹ️ No active queue entry found for today.
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                Check in for an online appointment or register as a walk-in at reception to track live progress.
-              </p>
-              <button className="btn btn-secondary" style={{ marginTop: '1rem' }} onClick={loadPatientLiveQueue}>🔄 Refresh Status</button>
+            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Currently Waiting</div>
+              <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#eab308' }}>
+                {doctorQueueData.length} In Queue
+              </div>
+            </div>
+            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Avg Speed (Configured)</div>
+              <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#38bdf8' }}>
+                {doctorIntel?.configuredAvgDurationMin ?? 15} mins
+              </div>
+            </div>
+            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Predicted Next Duration</div>
+              <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#a78bfa' }}>
+                {doctorIntel?.durationPrediction?.predictedDurationMinutes ?? 15} mins
+              </div>
+            </div>
+          </div>
+
+          {/* Active Examination Room Card */}
+          <div style={{ background: '#090d16', padding: '1.25rem', borderRadius: '10px', border: '1px solid var(--border)', marginBottom: '1.5rem' }}>
+            <h3 style={{ fontSize: '1.1rem', color: '#f8fafc', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>🚪 Examination Room Status</span>
+              {doctorActivePatient && (
+                <span style={{ fontSize: '0.8rem', padding: '0.2rem 0.6rem', borderRadius: '999px', background: doctorActivePatient.status === 'IN_CONSULTATION' ? '#065f46' : '#854d0e', color: '#fff' }}>
+                  {doctorActivePatient.status}
+                </span>
+              )}
+            </h3>
+
+            {doctorActivePatient ? (
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                  <div>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Token Number:</span>
+                    <div style={{ fontSize: '1.8rem', fontWeight: 'bold', color: 'var(--primary)' }}>
+                      #{doctorActivePatient.tokenNumber}
+                    </div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Patient Name:</span>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 600 }}>
+                      {doctorActivePatient.patientId?.fullName || 'Patient'}
+                    </div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Source / Priority:</span>
+                    <div style={{ fontSize: '1rem' }}>
+                      {doctorActivePatient.source} | {doctorActivePatient.priority}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  {doctorActivePatient.status === 'CALLED' && (
+                    <button className="btn btn-primary" disabled={doctorOpLoading} onClick={handleDoctorStartConsultation}>
+                      ▶ Start Consultation
+                    </button>
+                  )}
+                  {doctorActivePatient.status === 'IN_CONSULTATION' && (
+                    <button className="btn btn-primary" disabled={doctorOpLoading} onClick={handleDoctorCompleteConsultation}>
+                      ✓ Complete Consultation
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
+                <p>No patient is currently in the examination room.</p>
+                <button className="btn btn-primary" disabled={doctorOpLoading || doctorQueueData.length === 0} onClick={handleDoctorCallNext}>
+                  📢 Call Next Patient
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Today's Waiting Queue Table */}
+          <h3 style={{ fontSize: '1.1rem', color: '#f8fafc', marginBottom: '0.75rem' }}>
+            📋 Waiting Queue ({doctorQueueData.length})
+          </h3>
+          {doctorQueueData.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)', background: '#090d16', borderRadius: '8px' }}>
+              No patients waiting in queue today.
             </div>
           ) : (
-            <div>
-              {liveQueueData.queue.isQueuePaused && (
-                <div style={{ background: '#7c2d12', border: '1px solid #ea580c', padding: '0.75rem 1rem', borderRadius: '8px', color: '#ffedd5', marginBottom: '1rem', fontWeight: 500 }}>
-                  ⏸️ QUEUE PAUSED BY DOCTOR: {liveQueueData.queue.queuePauseReason || 'Calling next is temporarily paused.'}
-                </div>
-              )}
-
-              {liveQueueData.queue.status === 'CALLED' && (
-                <div style={{ background: '#064e3b', border: '2px solid #10b981', padding: '1rem', borderRadius: '8px', color: '#ffffff', textAlign: 'center', marginBottom: '1.25rem' }}>
-                  <h3 style={{ margin: 0, fontSize: '1.4rem', color: '#6ee7b7' }}>🔔 IT IS YOUR TURN!</h3>
-                  <p style={{ margin: '0.5rem 0 0', fontWeight: 'bold' }}>Please proceed immediately to {liveQueueData.queue.doctor?.fullName || 'the Doctor'}&apos;s consultation room.</p>
-                </div>
-              )}
-
-              {liveQueueData.queue.status === 'SKIPPED' && (
-                <div style={{ background: '#451a03', border: '1px solid #b45309', padding: '1rem', borderRadius: '8px', color: '#fef3c7', marginBottom: '1.25rem' }}>
-                  ⚠️ You were skipped by reception because you were not present when called. Please visit reception to <strong>REJOIN</strong> the queue.
-                </div>
-              )}
-
-              {liveQueueData.queue.status === 'NO_SHOW' && (
-                <div style={{ background: '#450a0a', border: '1px solid #991b1b', padding: '1rem', borderRadius: '8px', color: '#fecaca', marginBottom: '1.25rem' }}>
-                  ❌ Marked as No-Show. Please approach reception if you require assistance.
-                </div>
-              )}
-
-              {/* Main Grid Metrics */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
-                <div style={{ background: '#111827', padding: '1rem', borderRadius: '8px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>MY TOKEN</span>
-                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: 'var(--primary)' }}>#{liveQueueData.queue.tokenNumber}</div>
-                  <span className="badge badge-online">{liveQueueData.queue.status}</span>
-                </div>
-
-                <div style={{ background: '#111827', padding: '1rem', borderRadius: '8px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>CURRENTLY SERVING</span>
-                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#38bdf8' }}>
-                    {liveQueueData.queue.currentServingToken ? `#${liveQueueData.queue.currentServingToken}` : '—'}
-                  </div>
-                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    {liveQueueData.queue.servingState === 'IN_CONSULTATION' ? 'In Consultation' : liveQueueData.queue.servingState === 'CALLED' ? 'Called' : 'Idle'}
-                  </span>
-                </div>
-
-                <div style={{ background: '#111827', padding: '1rem', borderRadius: '8px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>QUEUE POSITION</span>
-                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#a7f3d0' }}>
-                    {liveQueueData.queue.queuePosition ? `#${liveQueueData.queue.queuePosition}` : '—'}
-                  </div>
-                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    {liveQueueData.queue.status === 'WAITING' ? `${liveQueueData.queue.peopleAhead} ahead of you` : liveQueueData.queue.status}
-                  </span>
-                </div>
-
-                <div style={{ background: '#111827', padding: '1rem', borderRadius: '8px', textAlign: 'center', border: '1px solid var(--border-color)' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ESTIMATED WAIT</span>
-                  <div style={{ fontSize: '2.2rem', fontWeight: 'bold', color: '#fde047' }}>
-                    {liveQueueData.queue.status === 'WAITING' ? `~${liveQueueData.queue.estimatedWaitMinutes}m` : '0m'}
-                  </div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    {liveQueueData.queue.isEstimated ? 'Approximate Estimate' : 'Exact'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Doctor & Clinic Info */}
-              <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem', marginTop: '1rem', fontSize: '0.9rem', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
-                <div>
-                  <strong>Doctor:</strong> {liveQueueData.queue.doctor?.fullName || 'Doctor'} ({liveQueueData.queue.doctor?.operationalStatus || 'AVAILABLE'})
-                  <br />
-                  <strong>Clinic:</strong> {liveQueueData.queue.clinic?.name || 'Clinic'}
-                </div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'right' }}>
-                  Auto-polling every 10s
-                  <br />
-                  Last updated: {liveQueueLastUpdated || 'Just now'}
-                </div>
-              </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="schedule-table">
+                <thead>
+                  <tr>
+                    <th>Token</th>
+                    <th>Patient</th>
+                    <th>Source</th>
+                    <th>Priority</th>
+                    <th>Joined At</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {doctorQueueData.map((q) => (
+                    <tr key={q._id}>
+                      <td style={{ fontWeight: 'bold', color: 'var(--primary)' }}>#{q.tokenNumber}</td>
+                      <td>{q.patientId?.fullName || 'Patient'}</td>
+                      <td>{q.source}</td>
+                      <td>{q.priority}</td>
+                      <td>{new Date(q.joinedAt).toLocaleTimeString()}</td>
+                      <td>
+                        {!doctorActivePatient && (
+                          <button className="btn btn-secondary" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} onClick={handleDoctorCallNext}>
+                            Call
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
-      ) : viewTab === 'public_display' ? (
-        /* VIEW: Public Queue Display Board (Phase 10 TV Display) */
-        <div className="card" style={{ background: '#090d16', border: '1px solid #1e293b' }}>
-          <h2 style={{ textAlign: 'center', color: '#38bdf8', marginBottom: '1rem' }}>📺 Clinic TV Queue Display Board</h2>
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.5rem', justifyContent: 'center' }}>
-            <input
-              type="text"
-              placeholder="Paste Clinic ID (e.g. 66bc...)"
-              value={publicClinicId}
-              onChange={(e) => setPublicClinicId(e.target.value.trim())}
-              style={{ width: '280px', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid #334155', background: '#0f172a', color: '#fff' }}
-            />
-            <input
-              type="text"
-              placeholder="Doctor ID (Optional)"
-              value={publicDoctorId}
-              onChange={(e) => setPublicDoctorId(e.target.value.trim())}
-              style={{ width: '220px', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid #334155', background: '#0f172a', color: '#fff' }}
-            />
-            <button className="btn btn-primary" onClick={loadPublicQueueDisplay}>📺 Load Display</button>
-          </div>
+      )}
 
-          {!publicClinicId ? (
-            <div className="empty-state">Enter a valid Clinic ID above to load the TV wall display monitor.</div>
-          ) : publicDisplayLoading && !publicDisplayData ? (
-            <div style={{ textAlign: 'center', padding: '2rem' }}>
-              <div className="spinner" style={{ margin: '0 auto 1rem' }}></div>
-              <p style={{ color: 'var(--text-muted)' }}>Loading TV display feed...</p>
-            </div>
-          ) : publicDisplayError ? (
-            <div style={{ color: '#ef4444', textAlign: 'center', padding: '1rem' }}>⚠️ {publicDisplayError}</div>
-          ) : publicDisplayData ? (
-            <div style={{ padding: '1rem' }}>
-              {publicDisplayData.doctor?.isQueuePaused && (
-                <div style={{ background: '#7c2d12', border: '2px solid #ea580c', padding: '1rem', borderRadius: '8px', color: '#ffedd5', textAlign: 'center', marginBottom: '1.5rem', fontWeight: 'bold', fontSize: '1.2rem' }}>
-                  ⏸️ QUEUE PAUSED: {publicDisplayData.doctor.queuePauseReason || 'Queue temporarily paused'}
-                </div>
-              )}
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', textAlign: 'center' }}>
-                <div style={{ background: '#0f172a', border: '2px solid #38bdf8', borderRadius: '12px', padding: '1.5rem' }}>
-                  <div style={{ fontSize: '1rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' }}>Now Serving Token</div>
-                  <div style={{ fontSize: '4rem', fontWeight: 'bold', color: '#38bdf8', margin: '0.5rem 0' }}>
-                    {publicDisplayData.display.currentServingToken ? `#${publicDisplayData.display.currentServingToken}` : '--'}
-                  </div>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: publicDisplayData.display.servingState === 'IN_CONSULTATION' ? '#4ade80' : '#facc15' }}>
-                    {publicDisplayData.display.servingState}
-                  </div>
-                </div>
-
-                <div style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: '12px', padding: '1.5rem' }}>
-                  <div style={{ fontSize: '1rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' }}>Next Waiting Tokens</div>
-                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'center', margin: '1rem 0' }}>
-                    {publicDisplayData.display.nextWaitingTokens && publicDisplayData.display.nextWaitingTokens.length > 0 ? (
-                      publicDisplayData.display.nextWaitingTokens.map((tk) => (
-                        <span key={tk} style={{ background: '#1e293b', border: '1px solid #475569', color: '#f8fafc', padding: '0.4rem 0.8rem', borderRadius: '6px', fontSize: '1.2rem', fontWeight: 'bold' }}>
-                          #{tk}
-                        </span>
-                      ))
-                    ) : (
-                      <span style={{ color: '#64748b' }}>No waiting patients</span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: '0.9rem', color: '#94a3b8' }}>Total Waiting: {publicDisplayData.display.totalWaitingCount}</div>
-                </div>
-              </div>
-
-              <div style={{ marginTop: '1.5rem', borderTop: '1px solid #334155', paddingTop: '1rem', display: 'flex', justifyContent: 'space-between', color: '#94a3b8', fontSize: '0.85rem' }}>
-                <div><strong>Clinic:</strong> {publicDisplayData.clinicName} | <strong>Doctor:</strong> {publicDisplayData.doctor?.fullName}</div>
-                <div>Live Feed | Updated: {publicLastUpdated || 'Just now'}</div>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : (
-        /* VIEW: Patient Discovery View */
+      {/* VIEW: Find / Discover Doctors */}
+      {viewTab === 'discover' && (
         <div className="discovery-layout">
           {/* Location Banner */}
           <div className="location-banner">
@@ -1278,132 +942,71 @@ export default function App() {
               <span>{locStatus}</span>
             </div>
             <button className="btn btn-secondary" onClick={handleGetLocation}>
-              {coords ? 'Refresh Location' : 'Use My Location'}
+              Use Current Location
             </button>
           </div>
 
-          {/* Specialty Categories */}
+          {/* Specialties Filter Chips */}
           <div className="categories-bar">
-            <button
-              className={`category-chip ${selectedSpecialty === '' ? 'active' : ''}`}
-              onClick={() => setSelectedSpecialty('')}
-            >
+            <button className={`category-chip ${selectedSpecialty === '' ? 'active' : ''}`} onClick={() => setSelectedSpecialty('')}>
               All Specialties
             </button>
-            {specialties.map((spec) => (
-              <button
-                key={spec._id}
-                className={`category-chip ${selectedSpecialty === spec._id ? 'active' : ''}`}
-                onClick={() => setSelectedSpecialty(spec._id)}
-              >
-                {spec.name}
+            {specialties.map((s) => (
+              <button key={s._id} className={`category-chip ${selectedSpecialty === s._id ? 'active' : ''}`} onClick={() => setSelectedSpecialty(s._id)}>
+                {s.name}
               </button>
             ))}
           </div>
 
-          {/* Filters & Sorting */}
+          {/* Filters Panel */}
           <div className="filters-panel">
             <div className="filter-group">
-              <span className="filter-label">Sort By</span>
-              <select className="filter-select" value={sort} onChange={(e) => setSort(e.target.value)}>
-                {coords && <option value="nearest">Nearest First</option>}
+              <label className="filter-label">Sort By</label>
+              <select className="filter-input" value={sort} onChange={(e) => setSort(e.target.value)}>
                 <option value="rating">Highest Rated</option>
                 <option value="experience">Most Experienced</option>
+                {coords && <option value="nearest">Nearest</option>}
               </select>
             </div>
-
             <div className="filter-group">
-              <span className="filter-label">Min Rating</span>
-              <select className="filter-select" value={minRating} onChange={(e) => setMinRating(e.target.value)}>
-                <option value="">Any Rating</option>
-                <option value="4.5">4.5+ ★</option>
-                <option value="4.0">4.0+ ★</option>
-                <option value="3.5">3.5+ ★</option>
+              <label className="filter-label">Min Rating</label>
+              <select className="filter-input" value={minRating} onChange={(e) => setMinRating(e.target.value)}>
+                <option value="">Any</option>
+                <option value="4.5">4.5+ Stars</option>
+                <option value="4.0">4.0+ Stars</option>
+                <option value="3.5">3.5+ Stars</option>
               </select>
             </div>
-
             <div className="filter-group">
-              <span className="filter-label">Min Experience</span>
-              <select className="filter-select" value={minExperience} onChange={(e) => setMinExperience(e.target.value)}>
-                <option value="">Any Experience</option>
-                <option value="5">5+ Years</option>
-                <option value="10">10+ Years</option>
-                <option value="15">15+ Years</option>
-              </select>
-            </div>
-
-            <div className="filter-group">
-              <span className="filter-label">Max Fee (₹)</span>
-              <input
-                type="number"
-                className="filter-input"
-                placeholder="e.g. 1000"
-                value={maxFee}
-                onChange={(e) => setMaxFee(e.target.value)}
-              />
-            </div>
-
-            <div className="filter-group">
-              <span className="filter-label">Doctor Gender</span>
-              <select className="filter-select" value={doctorGender} onChange={(e) => setDoctorGender(e.target.value)}>
-                <option value="">Any Gender</option>
-                <option value="MALE">Male</option>
-                <option value="FEMALE">Female</option>
-              </select>
+              <label className="filter-label">Max Fee (₹)</label>
+              <input type="number" className="filter-input" placeholder="e.g. 1000" value={maxFee} onChange={(e) => setMaxFee(e.target.value)} />
             </div>
           </div>
 
-          {/* Stage 1 Results Grid */}
+          {/* Doctors List */}
           {loading ? (
-            <div className="empty-state">Searching healthcare providers...</div>
+            <div className="empty-state">Loading doctors...</div>
           ) : error ? (
-            <div className="empty-state" style={{ color: 'var(--error-text)' }}>{error}</div>
+            <div className="empty-state">{error}</div>
           ) : doctors.length === 0 ? (
-            <div className="empty-state">No doctors found matching your criteria.</div>
+            <div className="empty-state">No doctors match your search criteria.</div>
           ) : (
-            <div className="doctors-grid">
-              {doctors.map((doc) => (
-                <div key={doc._id} className="doctor-card">
-                  <div>
-                    <div className="doctor-card-header">
-                      <img
-                        src={doc.photoUrl || 'https://via.placeholder.com/150'}
-                        alt={doc.fullName}
-                        className="doctor-avatar"
-                      />
-                      <div className="doctor-info-primary">
-                        <div className="doc-name">{doc.fullName}</div>
-                        <div className="doc-specialty">{doc.specialty?.name || 'General Doctor'}</div>
-                        <div className="doc-clinic">📍 {doc.clinic?.name || 'Clinic'}, {doc.clinic?.city || ''}</div>
-                      </div>
-                    </div>
-
-                    <div className="doctor-card-details">
-                      <div className="detail-pill">
-                        <span className="rating-star">★</span>
-                        <span>{doc.averageRating ? doc.averageRating.toFixed(1) : 'New'} ({doc.totalReviews || 0})</span>
-                      </div>
-                      <div className="detail-pill">
-                        <span>🎓 {doc.experienceYears || 0} yrs exp</span>
-                      </div>
-                      <div className="detail-pill">
-                        <span>💵 ₹{doc.consultationFee || 0}</span>
-                      </div>
-                      {doc.distanceKm !== null && doc.distanceKm !== undefined && (
-                        <div className="detail-pill">
-                          <span>🧭 {doc.distanceKm} km</span>
-                        </div>
-                      )}
-                    </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+              {doctors.map((d) => (
+                <div key={d._id} className="card" style={{ padding: '1rem', background: '#090d16', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <h3 style={{ fontSize: '1.1rem', margin: '0 0 0.5rem 0', color: 'var(--text-main)' }}>{d.fullName}</h3>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--primary)', marginBottom: '0.5rem' }}>{d.specialty?.name || 'General'}</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                    {d.clinic?.name} • ₹{d.consultationFee} • {d.experienceYears} yrs exp • ⭐ {d.averageRating?.toFixed(1) || '0.0'}
                   </div>
-
-                  <button
-                    className="btn btn-primary"
-                    style={{ width: '100%', marginTop: '0.75rem' }}
-                    onClick={() => handleOpenProfile(doc._id)}
-                  >
-                    View Profile
-                  </button>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => handleOpenProfile(d._id)}>
+                      View Profile
+                    </button>
+                    <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => handleProceedToAppointment(d)}>
+                      Book Slot
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1411,110 +1014,445 @@ export default function App() {
         </div>
       )}
 
-      {/* Phase 12 AI Intelligence View */}
+      {/* VIEW: My Appointments (Patient) */}
+      {viewTab === 'my_appointments' && (
+        <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+          <h2>📅 My Appointments</h2>
+          {myAppointments.length === 0 ? (
+            <div className="empty-state">No appointments booked yet.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {myAppointments.map((appt) => (
+                <div key={appt._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <div>
+                    <div style={{ fontWeight: 'bold', fontSize: '1rem' }}>Dr. {appt.doctorId?.userId?.name || appt.doctorId?.fullName || 'Doctor'}</div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      Date: {appt.appointmentDate} | Slot: {appt.slotTime} | Status: <strong style={{ color: 'var(--primary)' }}>{appt.status}</strong>
+                    </div>
+                  </div>
+                  {appt.status === 'BOOKED' && (
+                    <button className="btn btn-secondary" style={{ color: '#ef4444' }} onClick={() => handleCancelAppointment(appt._id)}>
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* VIEW: Patient Live Queue Experience */}
+      {viewTab === 'live_queue' && (
+        <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+          <h2>🎫 Patient Live Queue Tracker</h2>
+          {!liveQueueData || !liveQueueData.hasActiveQueueEntry ? (
+            <div className="empty-state">No active queue token for today. Book an appointment or check in at the clinic reception.</div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '1.5rem', background: '#090d16', borderRadius: '12px', border: '1px solid var(--border)' }}>
+              <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>YOUR QUEUE TOKEN</div>
+              <div style={{ fontSize: '3.5rem', fontWeight: 'bold', color: 'var(--primary)', margin: '0.5rem 0' }}>
+                #{liveQueueData.tokenNumber}
+              </div>
+              <div style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>
+                Status: <strong>{liveQueueData.status}</strong> | People Ahead: <strong>{liveQueueData.peopleAhead ?? 0}</strong>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+                <div style={{ background: '#1e293b', padding: '1rem', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Estimated Wait</div>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#38bdf8' }}>
+                    {liveQueueData.estimatedWaitMinutes ?? 0} mins
+                  </div>
+                </div>
+                <div style={{ background: '#1e293b', padding: '1rem', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Current Serving</div>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#eab308' }}>
+                    #{liveQueueData.currentServingToken ?? 'IDLE'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* VIEW: Staff Reception Desk */}
+      {viewTab === 'reception' && (
+        <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+          <h2>🏥 Staff Reception Desk — Operational Queue Management</h2>
+          {receptionMessage && (
+            <div style={{ background: '#1c1917', border: '1px solid var(--primary)', padding: '0.75rem', borderRadius: '8px', color: 'var(--text-main)', marginBottom: '1rem' }}>
+              {receptionMessage}
+            </div>
+          )}
+
+          {allocatedTokenCard && (
+            <div style={{ background: '#064e3b', border: '1px solid var(--success-text)', padding: '1rem', borderRadius: '8px', marginBottom: '1.25rem', textAlign: 'center' }}>
+              <h3 style={{ color: '#6ee7b7', margin: 0 }}>✓ QUEUE TOKEN ALLOCATED</h3>
+              <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#ffffff', margin: '0.5rem 0' }}>
+                Token #{allocatedTokenCard.tokenNumber}
+              </div>
+              <button className="btn btn-secondary" style={{ marginTop: '0.75rem', fontSize: '0.8rem' }} onClick={() => setAllocatedTokenCard(null)}>
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+            <input
+              type="text"
+              className="filter-input"
+              style={{ flex: 1, minWidth: '220px' }}
+              placeholder="Search patient by name or phone..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            <button className="btn btn-primary" onClick={handleStaffPatientSearch}>
+              Search Patient
+            </button>
+          </div>
+
+          {searchResults.length > 0 && (
+            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
+              <h4>Search Results</h4>
+              {searchResults.map((p) => (
+                <div key={p._id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
+                  <div>{p.fullName} ({p.phone})</div>
+                  <button className="btn btn-secondary" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} onClick={() => handleSelectStaffPatient(p)}>
+                    Select for Walk-In
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {selectedStaffPatient && (
+            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem', border: '1px solid var(--primary)' }}>
+              <h4>Selected Patient: {selectedStaffPatient.fullName} ({selectedStaffPatient.phone})</h4>
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <select className="filter-input" value={receptionDoctorId} onChange={(e) => setReceptionDoctorId(e.target.value)}>
+                  {doctors.map((d) => (
+                    <option key={d._id} value={d._id}>Dr. {d.fullName}</option>
+                  ))}
+                </select>
+                <button className="btn btn-primary" onClick={handleRegisterWalkInQueue}>
+                  Register Walk-In & Allocate Token
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Queue Overview & Action Buttons */}
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+            <button className="btn btn-primary" disabled={opLoading} onClick={handleCallNext}>
+              📢 Call Next Patient
+            </button>
+            <button className="btn btn-secondary" onClick={handlePauseQueue}>
+              ⏸ Pause Queue
+            </button>
+            <button className="btn btn-secondary" onClick={handleResumeQueue}>
+              ▶ Resume Queue
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+            {/* Active Serving Card */}
+            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <h4>Currently Serving ({activeEntries.length})</h4>
+              {activeEntries.length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No active patient called.</div>
+              ) : (
+                activeEntries.map((entry) => (
+                  <div key={entry._id} style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ fontWeight: 'bold', color: 'var(--primary)' }}>Token #{entry.tokenNumber} ({entry.status})</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{entry.patientId?.fullName || 'Patient'}</div>
+                    <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem' }}>
+                      {entry.status === 'CALLED' && (
+                        <button className="btn btn-primary" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => handleStartConsultation(entry._id)}>
+                          Start
+                        </button>
+                      )}
+                      {entry.status === 'IN_CONSULTATION' && (
+                        <button className="btn btn-primary" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => handleCompleteConsultation(entry._id)}>
+                          Complete
+                        </button>
+                      )}
+                      <button className="btn btn-secondary" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => handleSkip(entry._id)}>
+                        Skip
+                      </button>
+                      <button className="btn btn-secondary" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => handleNoShow(entry._id)}>
+                        No-Show
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Waiting Queue List */}
+            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <h4>Waiting in Queue ({waitingEntries.length})</h4>
+              {waitingEntries.length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No patients waiting.</div>
+              ) : (
+                waitingEntries.map((entry) => (
+                  <div key={entry._id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid var(--border)' }}>
+                    <span>Token #{entry.tokenNumber} - {entry.patientId?.fullName || 'Patient'}</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{entry.source}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW: Billing & Invoices */}
+      {viewTab === 'billing' && (
+        <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+          <h2>💳 Invoices & Payments</h2>
+          {currentRole === 'PATIENT' ? (
+            <div>
+              <h3>My Invoices</h3>
+              {patientInvoices.length === 0 ? (
+                <div className="empty-state">No invoices issued.</div>
+              ) : (
+                patientInvoices.map((inv) => (
+                  <div key={inv._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#090d16', padding: '1rem', borderRadius: '8px', marginBottom: '0.75rem' }}>
+                    <div>
+                      <div style={{ fontWeight: 'bold' }}>{inv.invoiceNumber}</div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                        Total Amount: ₹{inv.totalAmount} | Status: <strong style={{ color: inv.status === 'PAID' ? 'var(--primary)' : '#eab308' }}>{inv.status}</strong>
+                      </div>
+                    </div>
+                    {inv.status === 'UNPAID' && (
+                      <button className="btn btn-primary" onClick={() => handlePayInvoice(inv._id)}>
+                        Pay ₹{inv.totalAmount}
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          ) : (
+            <div>
+              <p style={{ color: 'var(--text-muted)' }}>Staff Billing & Refund console is accessible using staff credentials.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* VIEW: Public Queue Display Board */}
+      {viewTab === 'public_display' && (
+        <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+          <h2>📺 Anonymous Public Queue Display Board</h2>
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
+            <input
+              type="text"
+              className="filter-input"
+              placeholder="Enter Clinic ID..."
+              value={publicClinicId}
+              onChange={(e) => setPublicClinicId(e.target.value)}
+            />
+            <button className="btn btn-primary" onClick={loadPublicDisplay}>
+              Load Display Feed
+            </button>
+          </div>
+
+          {publicDisplayData && (
+            <div style={{ background: '#090d16', padding: '1.5rem', borderRadius: '12px', textAlign: 'center' }}>
+              <h3 style={{ color: 'var(--primary)' }}>{publicDisplayData.clinicName || 'Clinic Public Display'}</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+                <div style={{ background: '#1e293b', padding: '1rem', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Now Serving</div>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: 'var(--primary)' }}>
+                    #{publicDisplayData.currentServingToken || 'IDLE'}
+                  </div>
+                </div>
+                <div style={{ background: '#1e293b', padding: '1rem', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Total Waiting</div>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#eab308' }}>
+                    {publicDisplayData.totalWaiting || 0}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* VIEW: Analytics & Intelligence */}
       {viewTab === 'intelligence' && (
-        <div style={{ background: 'var(--card-bg)', padding: '1.5rem', borderRadius: '12px', marginTop: '1rem', border: '1px solid var(--border)' }}>
-          <h2 style={{ fontSize: '1.25rem', color: 'var(--primary)', marginBottom: '0.5rem' }}>🧠 Phase 12 — Queue Intelligence & Operational AI</h2>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+        <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+          <h2>🧠 Phase 12 — Queue Intelligence & Operational AI</h2>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
             Predictive machine learning models for wait times, consultation durations, congestion forecasts, and operational anomaly detection.
             <strong> Note: ML predictions are advisory only and never alter queue ordering.</strong>
           </p>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem' }}>
-            {/* Patient Live AI Wait Prediction */}
-            <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <h3 style={{ fontSize: '1rem', color: '#1e293b', marginBottom: '0.5rem' }}>📱 Patient AI Wait Prediction</h3>
-              <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.75rem' }}>
-                Machine-learning prediction of wait time based on doctor historical speed, queue position, and active consultation state.
-              </p>
-              <button
-                className="btn btn-primary"
-                style={{ width: '100%', padding: '0.5rem' }}
-                onClick={async () => {
-                  if (!patientToken) {
-                    alert('Please paste a Patient JWT token in the drawer above.');
-                    return;
-                  }
-                  const res = await fetchPatientQueuePrediction(patientToken);
-                  if (res.ok && res.data) {
-                    alert(`Patient Wait Intelligence:\n\n` +
-                      `Estimated Wait: ${res.data.data?.estimatedWaitMinutes ?? 'N/A'} mins\n` +
-                      `Deterministic Wait: ${res.data.data?.deterministicWaitMinutes ?? 'N/A'} mins\n` +
-                      `People Ahead: ${res.data.data?.peopleAhead ?? 0}\n` +
-                      `Prediction Method: ${res.data.data?.predictionMethod ?? 'FALLBACK'}\n` +
-                      `Confidence: ${res.data.data?.confidence ?? 'BASELINE'}`);
-                  } else {
-                    alert(`Error: ${res.data?.message || res.error}`);
-                  }
-                }}
-              >
-                Fetch My AI Wait Prediction
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <h4>Patient Wait Prediction</h4>
+              <button className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }} onClick={async () => {
+                if (!patientToken) return alert('Please sign in as Patient');
+                const res = await fetchPatientQueuePrediction(patientToken);
+                alert(`Prediction: ${res.data?.data?.estimatedWaitMinutes} mins (Confidence: ${res.data?.data?.confidence})`);
+              }}>
+                Fetch Live AI Wait Time
               </button>
             </div>
-
-            {/* Staff Queue Congestion & Anomalies */}
-            <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <h3 style={{ fontSize: '1rem', color: '#1e293b', marginBottom: '0.5rem' }}>🏥 Staff Queue Congestion & Anomalies</h3>
-              <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.75rem' }}>
-                Real-time congestion classification and operational anomaly detection (queue stalls, walk-in surges).
-              </p>
-              <button
-                className="btn btn-secondary"
-                style={{ width: '100%', padding: '0.5rem' }}
-                onClick={async () => {
-                  const token = staffToken || adminToken;
-                  if (!token) {
-                    alert('Please paste a Staff or Admin JWT token in the drawer above.');
-                    return;
-                  }
-                  const res = await fetchStaffQueueIntelligence(token);
-                  if (res.ok && res.data) {
-                    const data = res.data.data;
-                    alert(`Staff Queue Intelligence:\n\n` +
-                      `Congestion Level: ${data.congestionLevel}\n` +
-                      `Active Queue Count: ${data.activeQueueCount}\n` +
-                      `Waiting: ${data.waitingCount} | In Consultation: ${data.activeCount}\n` +
-                      `Workload Estimate: ${data.estimatedWorkloadMins} mins\n` +
-                      `Anomalies Detected: ${data.anomalies?.length || 0}`);
-                  } else {
-                    alert(`Error: ${res.data?.message || res.error}`);
-                  }
-                }}
-              >
-                Fetch Clinic Congestion & Anomalies
+            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <h4>Staff Congestion Intelligence</h4>
+              <button className="btn btn-secondary" style={{ width: '100%', marginTop: '0.5rem' }} onClick={async () => {
+                const token = staffToken || adminToken;
+                if (!token) return alert('Please sign in as Staff/Admin');
+                const res = await fetchStaffQueueIntelligence(token);
+                alert(`Congestion: ${res.data?.data?.congestionLevel} | Active Queue: ${res.data?.data?.activeQueueCount}`);
+              }}>
+                Fetch Clinic Congestion
               </button>
             </div>
+          </div>
+        </div>
+      )}
 
-            {/* Doctor Duration Trends */}
-            <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <h3 style={{ fontSize: '1rem', color: '#1e293b', marginBottom: '0.5rem' }}>🩺 Doctor Consultation Intelligence</h3>
-              <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.75rem' }}>
-                Predictive consultation duration trends using Ridge regression and EWMA baselines.
-              </p>
-              <button
-                className="btn btn-secondary"
-                style={{ width: '100%', padding: '0.5rem' }}
-                onClick={async () => {
-                  if (!doctorToken) {
-                    alert('Please paste a Doctor JWT token in the drawer above.');
-                    return;
-                  }
-                  const res = await fetchDoctorOwnIntelligence(doctorToken);
-                  if (res.ok && res.data) {
-                    const data = res.data.data;
-                    alert(`Doctor Intelligence:\n\n` +
-                      `Configured Avg Duration: ${data.configuredAvgDurationMin} mins\n` +
-                      `Today Completed: ${data.todayCompletedCount}\n` +
-                      `Today Waiting: ${data.todayWaitingCount}\n` +
-                      `Predicted Next Duration: ${data.durationPrediction?.predictedDurationMinutes} mins\n` +
-                      `Method: ${data.durationPrediction?.predictionMethod}`);
-                  } else {
-                    alert(`Error: ${res.data?.message || res.error}`);
-                  }
-                }}
-              >
-                Fetch My Doctor Intelligence
+      {/* Interactive Notification Center Drawer Modal (Phase 13) */}
+      {showNotificationDrawer && (
+        <div className="modal-overlay" onClick={() => setShowNotificationDrawer(false)}>
+          <div className="modal-content" style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setShowNotificationDrawer(false)}>×</button>
+            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--primary)' }}>🔔 In-App Notifications ({unreadCount} unread)</h3>
+
+            {notifications.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
+                No notifications found.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '60vh', overflowY: 'auto' }}>
+                {notifications.map((notif) => (
+                  <div
+                    key={notif.id}
+                    style={{
+                      background: notif.isRead ? 'rgba(30, 41, 59, 0.4)' : 'rgba(30, 41, 59, 0.9)',
+                      border: notif.isRead ? '1px solid var(--border)' : '1px solid var(--primary)',
+                      padding: '0.75rem',
+                      borderRadius: '8px',
+                      position: 'relative',
+                    }}
+                  >
+                    <div style={{ fontWeight: 'bold', fontSize: '0.9rem', color: notif.isRead ? 'var(--text-main)' : 'var(--primary)' }}>
+                      {notif.title}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0.25rem 0' }}>
+                      {notif.message}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: '#64748b' }}>
+                      <span>{new Date(notif.createdAt).toLocaleTimeString()}</span>
+                      {!notif.isRead && (
+                        <button
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }}
+                          onClick={() => handleMarkAsRead(notif.id)}
+                        >
+                          Mark as Read
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Authentication & Registration Modal (Phase 13) */}
+      {showAuthModal && (
+        <div className="modal-overlay" onClick={() => setShowAuthModal(false)}>
+          <div className="modal-content" style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setShowAuthModal(false)}>×</button>
+            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--primary)' }}>
+              {authMode === 'login' ? '🔑 Sign In to QFlow' : '📝 Create Patient Account'}
+            </h3>
+
+            {authError && (
+              <div style={{ background: '#450a0a', border: '1px solid #ef4444', color: '#fca5a5', padding: '0.5rem', borderRadius: '6px', fontSize: '0.8rem', marginBottom: '1rem' }}>
+                {authError}
+              </div>
+            )}
+
+            <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {authMode === 'register' && (
+                <>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Full Name</label>
+                    <input
+                      type="text"
+                      required
+                      className="filter-input"
+                      style={{ width: '100%', marginTop: '0.25rem' }}
+                      value={authForm.fullName}
+                      onChange={(e) => setAuthForm({ ...authForm, fullName: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Phone Number</label>
+                    <input
+                      type="tel"
+                      required
+                      className="filter-input"
+                      style={{ width: '100%', marginTop: '0.25rem' }}
+                      value={authForm.phone}
+                      onChange={(e) => setAuthForm({ ...authForm, phone: e.target.value })}
+                    />
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Email Address</label>
+                <input
+                  type="email"
+                  required
+                  className="filter-input"
+                  style={{ width: '100%', marginTop: '0.25rem' }}
+                  value={authForm.email}
+                  onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Password</label>
+                <input
+                  type="password"
+                  required
+                  className="filter-input"
+                  style={{ width: '100%', marginTop: '0.25rem' }}
+                  value={authForm.password}
+                  onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+                />
+              </div>
+
+              <button type="submit" disabled={authLoading} className="btn btn-primary" style={{ marginTop: '0.5rem' }}>
+                {authLoading ? 'Authenticating...' : authMode === 'login' ? 'Sign In' : 'Create Account'}
               </button>
+            </form>
+
+            <div style={{ textAlign: 'center', marginTop: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              {authMode === 'login' ? (
+                <span>
+                  Don't have an account?{' '}
+                  <button style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 0 }} onClick={() => { setAuthMode('register'); setAuthError(null); }}>
+                    Register here
+                  </button>
+                </span>
+              ) : (
+                <span>
+                  Already registered?{' '}
+                  <button style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 0 }} onClick={() => { setAuthMode('login'); setAuthError(null); }}>
+                    Sign in here
+                  </button>
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -1524,68 +1462,77 @@ export default function App() {
       {selectedDoctor && profileData && (
         <div className="modal-overlay" onClick={() => setSelectedDoctor(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setSelectedDoctor(null)}>✕</button>
-
-            <div style={{ display: 'flex', gap: '1.25rem', alignItems: 'center', marginBottom: '1.25rem' }}>
-              <img
-                src={profileData.photoUrl || 'https://via.placeholder.com/150'}
-                alt={profileData.fullName}
-                style={{ width: '72px', height: '72px', borderRadius: '50%', objectFit: 'cover' }}
-              />
-              <div>
-                <h2 style={{ fontSize: '1.3rem', color: 'var(--text-main)' }}>{profileData.fullName}</h2>
-                <p style={{ color: 'var(--primary)', fontWeight: 500 }}>{profileData.specialty?.name}</p>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>📍 {profileData.clinic?.name}, {profileData.clinic?.address?.city}</p>
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1.25rem', fontSize: '0.9rem' }}>
-              <div><strong>Qualifications:</strong> {profileData.qualifications ? profileData.qualifications.join(', ') : 'MBBS'}</div>
-              <div><strong>Experience:</strong> {profileData.experienceYears} Years</div>
-              <div><strong>Consultation Fee:</strong> ₹{profileData.consultationFee}</div>
-              <div><strong>Rating:</strong> ★ {profileData.averageRating?.toFixed(1) || 'N/A'} ({profileData.totalReviews || 0} reviews)</div>
-            </div>
-
-            <h3 style={{ fontSize: '1rem', color: 'var(--primary)', marginBottom: '0.5rem' }}>Weekly Working Schedule</h3>
-            {profileData.schedule && profileData.schedule.length > 0 ? (
-              <table className="schedule-table">
-                <thead>
-                  <tr>
-                    <th>Day</th>
-                    <th>Working</th>
-                    <th>Shifts</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {profileData.schedule.map((day, idx) => (
-                    <tr key={idx}>
-                      <td>{day.dayOfWeek}</td>
-                      <td>{day.isWorkingDay ? 'Yes' : 'Off'}</td>
-                      <td>
-                        {day.isWorkingDay && day.shifts
-                          ? day.shifts.map((s) => `${s.startTime}-${s.endTime}`).join(', ')
-                          : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Schedule not configured.</p>
-            )}
-
-            <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem' }}>
-              <button
-                className="btn btn-primary"
-                style={{ flex: 1, padding: '0.85rem' }}
-                onClick={() => handleProceedToAppointment(profileData)}
-              >
-                PROCEED TO APPOINTMENT
-              </button>
-            </div>
+            <button className="modal-close" onClick={() => setSelectedDoctor(null)}>×</button>
+            <h2>Dr. {profileData.fullName}</h2>
+            <p style={{ color: 'var(--primary)' }}>{profileData.specialty?.name}</p>
+            <p>{profileData.qualifications?.join(', ')} • {profileData.experienceYears} Years Experience</p>
+            <p>Fee: ₹{profileData.consultationFee}</p>
+            <button className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }} onClick={() => handleProceedToAppointment(selectedDoctor)}>
+              Proceed to Book Appointment
+            </button>
           </div>
         </div>
       )}
+
+      {/* Stage 3 Booking Modal */}
+      {bookingDoctor && (
+        <div className="modal-overlay" onClick={() => setBookingDoctor(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setBookingDoctor(null)}>×</button>
+            <h2>Book Appointment — Dr. {bookingDoctor.fullName}</h2>
+            <input type="date" className="filter-input" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} style={{ width: '100%', margin: '1rem 0' }} />
+            {loadingAvail ? (
+              <p>Checking slots...</p>
+            ) : availability?.availableSlots?.length > 0 ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: '0.5rem', marginBottom: '1rem' }}>
+                {availability.availableSlots.map((slot) => (
+                  <button
+                    key={slot}
+                    className={`btn ${selectedSlot === slot ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '0.8rem', padding: '0.4rem' }}
+                    onClick={() => setSelectedSlot(slot)}
+                  >
+                    {slot}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p style={{ color: 'var(--text-muted)' }}>No slots available for this date.</p>
+            )}
+
+            {bookingError && <p style={{ color: '#ef4444' }}>{bookingError}</p>}
+
+            <button className="btn btn-primary" style={{ width: '100%' }} disabled={!selectedSlot} onClick={handleConfirmBooking}>
+              Confirm Booking ({selectedSlot || 'Select a slot'})
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Developer Collapsible Toolbar (Preserved for Testing & Backward Compatibility) */}
+      <details style={{ marginTop: '3rem', padding: '0.75rem', background: 'rgba(15, 23, 42, 0.4)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+        <summary style={{ cursor: 'pointer', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+          🛠️ Developer Tools & Raw JWT Token Inspector (Collapsible)
+        </summary>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.75rem', fontSize: '0.75rem' }}>
+          <div>
+            <span>Patient Token:</span>
+            <input type="text" className="filter-input" style={{ width: '100%' }} value={patientToken} onChange={(e) => setPatientToken(e.target.value)} />
+          </div>
+          <div>
+            <span>Staff Token:</span>
+            <input type="text" className="filter-input" style={{ width: '100%' }} value={staffToken} onChange={(e) => setStaffToken(e.target.value)} />
+          </div>
+          <div>
+            <span>Doctor Token:</span>
+            <input type="text" className="filter-input" style={{ width: '100%' }} value={doctorToken} onChange={(e) => setDoctorToken(e.target.value)} />
+          </div>
+          <div>
+            <span>Admin Token:</span>
+            <input type="text" className="filter-input" style={{ width: '100%' }} value={adminToken} onChange={(e) => setAdminToken(e.target.value)} />
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

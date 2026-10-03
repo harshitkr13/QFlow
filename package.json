@@ -9,7 +9,8 @@
     "dev:server": "nodemon src/server/server.js",
     "dev:client": "vite --config src/client/vite.config.js src/client",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "build:client": "vite build --config src/client/vite.config.js src/client"
+    "build:client": "vite build --config src/client/vite.config.js src/client",
+    "test": "node src/server/utils/runAllValidations.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
