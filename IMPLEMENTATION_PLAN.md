@@ -150,8 +150,8 @@ Implemented public display, ratings & notifications:
 Deliverable:
 Anonymous public display board, verified ratings system, and in-app notifications completed, audited, tested (100% pass across 9 core tests & regression), and committed (`5c0c606`).
 
-### Phase 11 — Payment Architecture, Invoicing & Clinic Analytics (DESIGN SPECIFIED)
-Design & implement billing, payments & operational analytics:
+### Phase 11 — Payment Architecture, Invoicing & Clinic Analytics (COMPLETE)
+Implemented billing, payments & operational analytics:
 - provider-agnostic invoicing (`Invoice.js` model & status lifecycle)
 - payment tracking & verification (`Payment.js` model & provider abstraction)
 - server-controlled fee calculation & 1-invoice-per-consultation uniqueness
@@ -161,22 +161,21 @@ Design & implement billing, payments & operational analytics:
 - Detailed Specification: `docs/PHASE_11_DESIGN.md`
 
 Deliverable:
-Financial invoicing, payment abstraction, and operational analytics design specified.
+Financial invoicing, payment abstraction, and operational analytics completed, audited, tested (100% pass across Phase 11 & regressions), committed (`e58573e`), and pushed.
 
-### Phase 12 — Validation, Security & Production Hardening
-- server validation
-- authorization review
-- edge cases
-- duplicate submission protection
-- token collision tests
-- appointment conflicts
-- break conflicts
-- no-show behavior
-- production build
-- deployment
+### Phase 12 — Queue Intelligence & Operational AI (IMPLEMENTATION COMPLETE — AWAITING CODE REVIEW)
+Implemented AI/ML intelligence layer:
+- server-side feature extraction (`mlFeatureExtractor.js`)
+- Ridge regression duration predictor with EWMA & doctor average fallbacks (`mlModelEngine.js`)
+- ML-assisted patient wait prediction with 100% Phase 09 deterministic fallback guardrails
+- clinic queue congestion forecasting & real-time operational anomaly detection
+- advisory no-show risk probability scoring
+- RBAC & IDOR-protected intelligence REST APIs (`intelligenceRoutes.js`)
+- React AI Intelligence Dashboard component (`App.jsx` & `api.js`)
+- Detailed Specification: `docs/PHASE_12_DESIGN.md`
 
 Deliverable:
-Portfolio-ready release.
+Phase 12 Queue Intelligence layer fully implemented, validated, and awaiting read-only code audit.
 
 ---
 

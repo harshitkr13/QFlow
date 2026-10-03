@@ -542,3 +542,69 @@ export const fetchAdminAnalyticsSummary = async (token) => {
   }
 };
 
+// Phase 12 Intelligence API Helpers
+export const fetchPatientQueuePrediction = async (token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/patient/queue/prediction`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchStaffQueueIntelligence = async (token, clinicId = null) => {
+  try {
+    let url = `${API_BASE_URL}/staff/intelligence/queue`;
+    if (clinicId) url += `?clinicId=${encodeURIComponent(clinicId)}`;
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchStaffAnomalies = async (token, clinicId = null) => {
+  try {
+    let url = `${API_BASE_URL}/staff/intelligence/anomalies`;
+    if (clinicId) url += `?clinicId=${encodeURIComponent(clinicId)}`;
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchDoctorOwnIntelligence = async (token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/doctor/intelligence/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchAdminIntelligenceSummary = async (token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/admin/intelligence/summary`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+

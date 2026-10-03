@@ -34,6 +34,11 @@ import {
   fetchStaffDailyAnalytics,
   fetchDoctorMeAnalytics,
   fetchAdminAnalyticsSummary,
+  fetchPatientQueuePrediction,
+  fetchStaffQueueIntelligence,
+  fetchStaffAnomalies,
+  fetchDoctorOwnIntelligence,
+  fetchAdminIntelligenceSummary,
 } from './services/api';
 import './App.css';
 
@@ -644,6 +649,12 @@ export default function App() {
             onClick={() => setViewTab('analytics')}
           >
             📊 Analytics Dashboard
+          </button>
+          <button
+            className={`btn ${viewTab === 'intelligence' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setViewTab('intelligence')}
+          >
+            🧠 AI Intelligence
           </button>
         </div>
       </header>
@@ -1397,6 +1408,115 @@ export default function App() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Phase 12 AI Intelligence View */}
+      {viewTab === 'intelligence' && (
+        <div style={{ background: 'var(--card-bg)', padding: '1.5rem', borderRadius: '12px', marginTop: '1rem', border: '1px solid var(--border)' }}>
+          <h2 style={{ fontSize: '1.25rem', color: 'var(--primary)', marginBottom: '0.5rem' }}>🧠 Phase 12 — Queue Intelligence & Operational AI</h2>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+            Predictive machine learning models for wait times, consultation durations, congestion forecasts, and operational anomaly detection.
+            <strong> Note: ML predictions are advisory only and never alter queue ordering.</strong>
+          </p>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem' }}>
+            {/* Patient Live AI Wait Prediction */}
+            <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <h3 style={{ fontSize: '1rem', color: '#1e293b', marginBottom: '0.5rem' }}>📱 Patient AI Wait Prediction</h3>
+              <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.75rem' }}>
+                Machine-learning prediction of wait time based on doctor historical speed, queue position, and active consultation state.
+              </p>
+              <button
+                className="btn btn-primary"
+                style={{ width: '100%', padding: '0.5rem' }}
+                onClick={async () => {
+                  if (!patientToken) {
+                    alert('Please paste a Patient JWT token in the drawer above.');
+                    return;
+                  }
+                  const res = await fetchPatientQueuePrediction(patientToken);
+                  if (res.ok && res.data) {
+                    alert(`Patient Wait Intelligence:\n\n` +
+                      `Estimated Wait: ${res.data.data?.estimatedWaitMinutes ?? 'N/A'} mins\n` +
+                      `Deterministic Wait: ${res.data.data?.deterministicWaitMinutes ?? 'N/A'} mins\n` +
+                      `People Ahead: ${res.data.data?.peopleAhead ?? 0}\n` +
+                      `Prediction Method: ${res.data.data?.predictionMethod ?? 'FALLBACK'}\n` +
+                      `Confidence: ${res.data.data?.confidence ?? 'BASELINE'}`);
+                  } else {
+                    alert(`Error: ${res.data?.message || res.error}`);
+                  }
+                }}
+              >
+                Fetch My AI Wait Prediction
+              </button>
+            </div>
+
+            {/* Staff Queue Congestion & Anomalies */}
+            <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <h3 style={{ fontSize: '1rem', color: '#1e293b', marginBottom: '0.5rem' }}>🏥 Staff Queue Congestion & Anomalies</h3>
+              <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.75rem' }}>
+                Real-time congestion classification and operational anomaly detection (queue stalls, walk-in surges).
+              </p>
+              <button
+                className="btn btn-secondary"
+                style={{ width: '100%', padding: '0.5rem' }}
+                onClick={async () => {
+                  const token = staffToken || adminToken;
+                  if (!token) {
+                    alert('Please paste a Staff or Admin JWT token in the drawer above.');
+                    return;
+                  }
+                  const res = await fetchStaffQueueIntelligence(token);
+                  if (res.ok && res.data) {
+                    const data = res.data.data;
+                    alert(`Staff Queue Intelligence:\n\n` +
+                      `Congestion Level: ${data.congestionLevel}\n` +
+                      `Active Queue Count: ${data.activeQueueCount}\n` +
+                      `Waiting: ${data.waitingCount} | In Consultation: ${data.activeCount}\n` +
+                      `Workload Estimate: ${data.estimatedWorkloadMins} mins\n` +
+                      `Anomalies Detected: ${data.anomalies?.length || 0}`);
+                  } else {
+                    alert(`Error: ${res.data?.message || res.error}`);
+                  }
+                }}
+              >
+                Fetch Clinic Congestion & Anomalies
+              </button>
+            </div>
+
+            {/* Doctor Duration Trends */}
+            <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <h3 style={{ fontSize: '1rem', color: '#1e293b', marginBottom: '0.5rem' }}>🩺 Doctor Consultation Intelligence</h3>
+              <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '0.75rem' }}>
+                Predictive consultation duration trends using Ridge regression and EWMA baselines.
+              </p>
+              <button
+                className="btn btn-secondary"
+                style={{ width: '100%', padding: '0.5rem' }}
+                onClick={async () => {
+                  if (!doctorToken) {
+                    alert('Please paste a Doctor JWT token in the drawer above.');
+                    return;
+                  }
+                  const res = await fetchDoctorOwnIntelligence(doctorToken);
+                  if (res.ok && res.data) {
+                    const data = res.data.data;
+                    alert(`Doctor Intelligence:\n\n` +
+                      `Configured Avg Duration: ${data.configuredAvgDurationMin} mins\n` +
+                      `Today Completed: ${data.todayCompletedCount}\n` +
+                      `Today Waiting: ${data.todayWaitingCount}\n` +
+                      `Predicted Next Duration: ${data.durationPrediction?.predictedDurationMinutes} mins\n` +
+                      `Method: ${data.durationPrediction?.predictionMethod}`);
+                  } else {
+                    alert(`Error: ${res.data?.message || res.error}`);
+                  }
+                }}
+              >
+                Fetch My Doctor Intelligence
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

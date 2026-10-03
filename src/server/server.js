@@ -17,6 +17,7 @@ import ratingRoutes from './routes/ratingRoutes.js';
 import patientNotificationRoutes from './routes/patientNotificationRoutes.js';
 import billingRoutes from './routes/billingRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
+import intelligenceRoutes from './routes/intelligenceRoutes.js';
 import { notFoundHandler, errorHandler } from './middleware/errorMiddleware.js';
 
 // Load environment variables
@@ -48,6 +49,7 @@ app.use('/api/public/queue', publicQueueRoutes);
 app.use('/api', ratingRoutes);
 app.use('/api', billingRoutes);
 app.use('/api', analyticsRoutes);
+app.use('/api', intelligenceRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/appointments', appointmentRoutes);
 
