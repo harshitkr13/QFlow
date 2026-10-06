@@ -83,6 +83,8 @@ const financialAuditLogSchema = new mongoose.Schema(
 
 financialAuditLogSchema.index({ invoiceId: 1, timestamp: -1 });
 financialAuditLogSchema.index({ patientId: 1, timestamp: -1 });
+financialAuditLogSchema.index({ clinicId: 1, action: 1, timestamp: -1 });
+financialAuditLogSchema.index({ clinicId: 1, timestamp: -1 });
 
 export const FinancialAuditLog = mongoose.model('FinancialAuditLog', financialAuditLogSchema);
 export default FinancialAuditLog;

@@ -74,6 +74,8 @@ const queueHistorySchema = new mongoose.Schema(
 // Indexes
 queueHistorySchema.index({ doctorId: 1, timestamp: -1 });
 queueHistorySchema.index({ queueEntryId: 1, timestamp: 1 });
+queueHistorySchema.index({ clinicId: 1, action: 1, timestamp: -1 });
+queueHistorySchema.index({ clinicId: 1, timestamp: -1 });
 
 export const QueueHistory = mongoose.model('QueueHistory', queueHistorySchema);
 export default QueueHistory;

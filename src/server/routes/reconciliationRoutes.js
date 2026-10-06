@@ -4,6 +4,10 @@ import {
   closeClinicDay,
   getSettlementHistory,
 } from '../controllers/reconciliationController.js';
+import {
+  exportDailySettlementCSV,
+  exportInvoicesCSV,
+} from '../controllers/exportController.js';
 import { protect, authorize } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -21,5 +25,9 @@ router.post('/close', closeClinicDay);
 
 // Settlement History
 router.get('/history', getSettlementHistory);
+
+// CSV Export Endpoints (Streamed RFC 4180 Responses)
+router.get('/settlements/:id/export', exportDailySettlementCSV);
+router.get('/invoices/export', exportInvoicesCSV);
 
 export default router;

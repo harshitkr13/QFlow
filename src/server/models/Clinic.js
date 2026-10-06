@@ -53,6 +53,24 @@ const clinicSchema = new mongoose.Schema(
       enum: ['HYBRID', 'FIFO', 'APPOINTMENT_PRIORITY'],
       default: 'HYBRID',
     },
+    operationalPolicy: {
+      selfCheckInLeadMinutes: {
+        type: Number,
+        default: 60,
+        min: 15,
+        max: 180,
+      },
+      selfCheckInGraceMinutes: {
+        type: Number,
+        default: 30,
+        min: 5,
+        max: 120,
+      },
+      autoExpireOnSettlement: {
+        type: Boolean,
+        default: true,
+      },
+    },
     isActive: {
       type: Boolean,
       default: true,

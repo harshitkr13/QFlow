@@ -49,8 +49,69 @@ import {
   fetchReconciliationPreview,
   closeClinicDay,
   fetchDailySettlements,
+  downloadSettlementCSV,
+  downloadInvoicesCSV,
+  fetchQueueAuditHistory,
+  fetchFinancialAuditHistory,
+  getClinicOperationalPolicy,
+  updateClinicOperationalPolicy,
 } from './services/api';
 import './App.css';
+
+// ----------------------------------------------------
+// Clinical SVG Icons (Zero External Dependencies)
+// ----------------------------------------------------
+const IconPulse = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+  </svg>
+);
+
+const IconSearch = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="8" />
+    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+  </svg>
+);
+
+const IconLocation = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z" />
+    <circle cx="12" cy="10" r="3" />
+  </svg>
+);
+
+const IconClock = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <polyline points="12 6 12 12 16 14" />
+  </svg>
+);
+
+const IconShield = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+  </svg>
+);
+
+const IconActivity = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+  </svg>
+);
+
+const IconBell = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+  </svg>
+);
+
+const IconStar = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="#f59e0b" stroke="#f59e0b" strokeWidth="1">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  </svg>
+);
 
 export default function App() {
   // ----------------------------------------------------
@@ -271,6 +332,7 @@ export default function App() {
 
   const [coords, setCoords] = useState(null);
   const [locStatus, setLocStatus] = useState('Location: Not requested');
+  const [locLoading, setLocLoading] = useState(false);
 
   const [selectedDoctor, setSelectedDoctor] = useState(null);
   const [profileData, setProfileData] = useState(null);
@@ -349,6 +411,47 @@ export default function App() {
       setError(res.data?.message || res.error || 'Failed to discover doctors');
     }
     setLoading(false);
+  };
+
+  const handleGetLocation = () => {
+    if (!navigator.geolocation) {
+      setLocStatus('Geolocation is not supported by your browser');
+      return;
+    }
+
+    setLocLoading(true);
+    setLocStatus('Detecting your location...');
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setCoords({ latitude, longitude });
+        setLocStatus(`Location acquired (${latitude.toFixed(2)}, ${longitude.toFixed(2)})`);
+        setLocLoading(false);
+      },
+      (error) => {
+        setLocLoading(false);
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            setLocStatus('Location permission denied');
+            break;
+          case error.POSITION_UNAVAILABLE:
+            setLocStatus('Location information unavailable');
+            break;
+          case error.TIMEOUT:
+            setLocStatus('Location request timed out');
+            break;
+          default:
+            setLocStatus(`Location error: ${error.message || 'Unable to retrieve location'}`);
+            break;
+        }
+      },
+      {
+        enableHighAccuracy: false,
+        timeout: 10000,
+        maximumAge: 60000,
+      }
+    );
   };
 
   useEffect(() => {
@@ -715,6 +818,135 @@ export default function App() {
     }
   }, [viewTab, staffToken, adminToken, loadSettlementPreview]);
 
+  // ----------------------------------------------------
+  // Phase 15: Export & Governance State & Handlers
+  // ----------------------------------------------------
+  const [exportLoadingId, setExportLoadingId] = useState(null);
+  const [invoicesExportLoading, setInvoicesExportLoading] = useState(false);
+
+  const handleExportSettlementCSV = async (settlementId) => {
+    const token = staffToken || adminToken;
+    if (!token) return;
+    setExportLoadingId(settlementId);
+    const res = await downloadSettlementCSV(settlementId, token);
+    if (!res.ok) {
+      alert(`Export failed: ${res.error || 'Failed to download settlement CSV'}`);
+    }
+    setExportLoadingId(null);
+  };
+
+  const handleExportInvoicesCSV = async (clinicId, date) => {
+    const token = staffToken || adminToken;
+    if (!token) return;
+    setInvoicesExportLoading(true);
+    const res = await downloadInvoicesCSV(clinicId, date, token);
+    if (!res.ok) {
+      alert(`Invoice export failed: ${res.error || 'Failed to download invoices CSV'}`);
+    }
+    setInvoicesExportLoading(false);
+  };
+
+  // Admin Governance State
+  const [adminSubTab, setAdminSubTab] = useState('policy'); // 'policy' | 'queue_audit' | 'financial_audit'
+  const [governanceClinicId, setGovernanceClinicId] = useState('');
+  const [clinicPolicyForm, setClinicPolicyForm] = useState({
+    selfCheckInLeadMinutes: 60,
+    selfCheckInGraceMinutes: 30,
+    autoExpireOnSettlement: true,
+    queuePolicy: 'HYBRID',
+  });
+  const [policyLoading, setPolicyLoading] = useState(false);
+  const [policyMessage, setPolicyMessage] = useState(null);
+
+  // Queue Audit State
+  const [queueAuditLogs, setQueueAuditLogs] = useState([]);
+  const [queueAuditTotal, setQueueAuditTotal] = useState(0);
+  const [queueAuditPage, setQueueAuditPage] = useState(1);
+  const [queueAuditAction, setQueueAuditAction] = useState('');
+  const [queueAuditLoading, setQueueAuditLoading] = useState(false);
+
+  // Financial Audit State
+  const [financialAuditLogs, setFinancialAuditLogs] = useState([]);
+  const [financialAuditTotal, setFinancialAuditTotal] = useState(0);
+  const [financialAuditPage, setFinancialAuditPage] = useState(1);
+  const [financialAuditAction, setFinancialAuditAction] = useState('');
+  const [financialAuditLoading, setFinancialAuditLoading] = useState(false);
+
+  const loadClinicPolicy = useCallback(async (cId) => {
+    const targetClinicId = cId || governanceClinicId || doctors[0]?.clinicId?._id || doctors[0]?.clinicId;
+    if (!targetClinicId || !adminToken) return;
+    setPolicyLoading(true);
+    const res = await getClinicOperationalPolicy(targetClinicId, adminToken);
+    if (res.ok && res.data?.policy) {
+      setClinicPolicyForm({
+        selfCheckInLeadMinutes: res.data.policy.selfCheckInLeadMinutes ?? 60,
+        selfCheckInGraceMinutes: res.data.policy.selfCheckInGraceMinutes ?? 30,
+        autoExpireOnSettlement: res.data.policy.autoExpireOnSettlement ?? true,
+        queuePolicy: res.data.queuePolicy || 'HYBRID',
+      });
+      if (!governanceClinicId) setGovernanceClinicId(targetClinicId);
+    }
+    setPolicyLoading(false);
+  }, [governanceClinicId, doctors, adminToken]);
+
+  const handleSaveClinicPolicy = async (e) => {
+    e?.preventDefault();
+    const targetClinicId = governanceClinicId || doctors[0]?.clinicId?._id || doctors[0]?.clinicId;
+    if (!targetClinicId || !adminToken) return;
+    setPolicyLoading(true);
+    setPolicyMessage(null);
+    const res = await updateClinicOperationalPolicy(targetClinicId, {
+      selfCheckInLeadMinutes: Number(clinicPolicyForm.selfCheckInLeadMinutes),
+      selfCheckInGraceMinutes: Number(clinicPolicyForm.selfCheckInGraceMinutes),
+      autoExpireOnSettlement: Boolean(clinicPolicyForm.autoExpireOnSettlement),
+      queuePolicy: clinicPolicyForm.queuePolicy,
+    }, adminToken);
+    if (res.ok && res.data?.success) {
+      setPolicyMessage('✓ Clinic operational policy updated successfully!');
+    } else {
+      setPolicyMessage(`Policy update failed: ${res.data?.message || res.error || 'Server error'}`);
+    }
+    setPolicyLoading(false);
+  };
+
+  const loadQueueAuditLogs = useCallback(async (page = 1) => {
+    if (!adminToken) return;
+    setQueueAuditLoading(true);
+    const params = { page, limit: 25 };
+    if (queueAuditAction) params.action = queueAuditAction;
+    if (governanceClinicId) params.clinicId = governanceClinicId;
+    const res = await fetchQueueAuditHistory(params, adminToken);
+    if (res.ok && res.data) {
+      setQueueAuditLogs(res.data.logs || []);
+      setQueueAuditTotal(res.data.total || 0);
+      setQueueAuditPage(res.data.page || 1);
+    }
+    setQueueAuditLoading(false);
+  }, [adminToken, queueAuditAction, governanceClinicId]);
+
+  const loadFinancialAuditLogs = useCallback(async (page = 1) => {
+    if (!adminToken) return;
+    setFinancialAuditLoading(true);
+    const params = { page, limit: 25 };
+    if (financialAuditAction) params.action = financialAuditAction;
+    if (governanceClinicId) params.clinicId = governanceClinicId;
+    const res = await fetchFinancialAuditHistory(params, adminToken);
+    if (res.ok && res.data) {
+      setFinancialAuditLogs(res.data.logs || []);
+      setFinancialAuditTotal(res.data.total || 0);
+      setFinancialAuditPage(res.data.page || 1);
+    }
+    setFinancialAuditLoading(false);
+  }, [adminToken, financialAuditAction, governanceClinicId]);
+
+  useEffect(() => {
+    if (viewTab === 'governance' && adminToken) {
+      if (adminSubTab === 'policy') loadClinicPolicy();
+      if (adminSubTab === 'queue_audit') loadQueueAuditLogs(1);
+      if (adminSubTab === 'financial_audit') loadFinancialAuditLogs(1);
+    }
+  }, [viewTab, adminSubTab, adminToken, loadClinicPolicy, loadQueueAuditLogs, loadFinancialAuditLogs]);
+
   // Live Queue & Public Polling
   const loadLiveQueue = useCallback(async () => {
     if (!patientToken) return;
@@ -810,90 +1042,148 @@ export default function App() {
   };
 
   return (
-    <div className="container">
+    <div className="app-shell">
       {/* Top Application Header */}
-      <header className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
-        <div>
-          <h1 className="title" style={{ margin: 0, textAlign: 'left', fontSize: '1.75rem' }}>QFlow</h1>
-          <div className="subtitle" style={{ textAlign: 'left' }}>Healthcare Virtual Queue & Clinic Management</div>
-        </div>
-
-        {/* User Identity & Navigation Action Bar */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          {/* Notification Bell (Patient Only) */}
-          {currentRole === 'PATIENT' && (
-            <button
-              className="btn btn-secondary"
-              style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-              onClick={() => setShowNotificationDrawer(true)}
-            >
-              🔔 Notifications
-              {unreadCount > 0 && (
-                <span style={{ background: '#ef4444', color: '#fff', fontSize: '0.75rem', padding: '0.1rem 0.4rem', borderRadius: '999px', fontWeight: 'bold' }}>
-                  {unreadCount}
-                </span>
-              )}
-            </button>
-          )}
-
-          {authSession?.user ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(30, 41, 59, 0.6)', padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <div style={{ textAlign: 'right', fontSize: '0.8rem' }}>
-                <div style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>{authSession.user.name || 'User'}</div>
-                <div style={{ color: 'var(--primary)', fontSize: '0.75rem', fontWeight: 600 }}>{currentRole}</div>
-              </div>
-              <button className="btn btn-secondary" style={{ padding: '0.35rem 0.6rem', fontSize: '0.75rem' }} onClick={handleLogout}>
-                Sign Out
-              </button>
+      <header className="app-header">
+        <div className="header-inner">
+          <div className="brand-group" onClick={() => setViewTab('discover')}>
+            <div className="brand-icon-wrapper">
+              <IconPulse />
             </div>
-          ) : (
-            <button className="btn btn-primary" onClick={() => { setAuthMode('login'); setShowAuthModal(true); }}>
-              🔑 Sign In / Register
-            </button>
-          )}
-        </div>
+            <div className="brand-text-block">
+              <div className="brand-title">QFlow</div>
+              <div className="brand-badge">
+                <span className="status-dot-pulse" /> Healthcare OS
+              </div>
+            </div>
+          </div>
 
-        {/* Role-Based Navigation Bar */}
-        <div style={{ width: '100%', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
-          {/* Patient Views */}
+          {/* Quick Context & User Profile */}
+          <div className="header-actions">
+            {/* Location Pill Quick Status */}
+            <div
+              className="user-profile-badge"
+              style={{ cursor: 'pointer' }}
+              onClick={handleGetLocation}
+              title={locStatus}
+            >
+              <div style={{ color: 'var(--primary-light)', display: 'flex' }}>
+                <IconLocation />
+              </div>
+              <span style={{ fontSize: '0.78rem', color: coords ? 'var(--status-success)' : 'var(--text-muted)' }}>
+                {locLoading ? 'Locating...' : coords ? `📍 ${coords.latitude.toFixed(2)}, ${coords.longitude.toFixed(2)}` : 'Location'}
+              </span>
+            </div>
+
+            {/* Notification Bell (Patient Only) */}
+            {currentRole === 'PATIENT' && (
+              <button
+                className="btn-icon"
+                onClick={() => setShowNotificationDrawer(true)}
+                title="Notifications"
+              >
+                <IconBell />
+                {unreadCount > 0 && (
+                  <span className="unread-badge">{unreadCount}</span>
+                )}
+              </button>
+            )}
+
+            {authSession?.user ? (
+              <div className="user-profile-badge">
+                <div className="user-avatar-circle">
+                  {(authSession.user.name || authSession.user.email || 'U')[0].toUpperCase()}
+                </div>
+                <div className="user-info-text">
+                  <div className="user-name-text">{authSession.user.name || authSession.user.email?.split('@')[0] || 'User'}</div>
+                  <div className="user-role-badge">{currentRole}</div>
+                </div>
+                <button
+                  className="btn btn-ghost"
+                  style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', marginLeft: '0.25rem' }}
+                  onClick={handleLogout}
+                >
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <button
+                className="btn btn-primary"
+                onClick={() => { setAuthMode('login'); setShowAuthModal(true); }}
+              >
+                Sign In
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* Role-Based Secondary Navigation Bar */}
+      <nav className="nav-subbar">
+        <div className="nav-subbar-inner">
+          {/* Patient / Guest Views */}
           {(currentRole === 'GUEST' || currentRole === 'PATIENT') && (
-            <button className={`btn ${viewTab === 'discover' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('discover')}>
-              🔍 Find Doctors
+            <button
+              className={`nav-tab-btn ${viewTab === 'discover' ? 'active' : ''}`}
+              onClick={() => setViewTab('discover')}
+            >
+              <IconSearch /> Find Specialists
             </button>
           )}
 
           {currentRole === 'PATIENT' && (
             <>
-              <button className={`btn ${viewTab === 'my_appointments' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('my_appointments')}>
-                📅 My Appointments
+              <button
+                className={`nav-tab-btn ${viewTab === 'my_appointments' ? 'active' : ''}`}
+                onClick={() => setViewTab('my_appointments')}
+              >
+                Appointments
               </button>
-              <button className={`btn ${viewTab === 'live_queue' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('live_queue')}>
-                🎫 My Live Queue
+              <button
+                className={`nav-tab-btn ${viewTab === 'live_queue' ? 'active' : ''}`}
+                onClick={() => setViewTab('live_queue')}
+              >
+                Live Queue
               </button>
-              <button className={`btn ${viewTab === 'billing' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('billing')}>
-                💳 Invoices & Payments
+              <button
+                className={`nav-tab-btn ${viewTab === 'billing' ? 'active' : ''}`}
+                onClick={() => setViewTab('billing')}
+              >
+                Invoices & Payments
               </button>
             </>
           )}
 
           {/* Doctor View */}
           {currentRole === 'DOCTOR' && (
-            <button className={`btn ${viewTab === 'doctor_cockpit' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('doctor_cockpit')}>
-              🩺 Doctor Cockpit
+            <button
+              className={`nav-tab-btn ${viewTab === 'doctor_cockpit' ? 'active' : ''}`}
+              onClick={() => setViewTab('doctor_cockpit')}
+            >
+              Clinical Cockpit
             </button>
           )}
 
           {/* Staff & Admin Views */}
           {(currentRole === 'STAFF' || currentRole === 'ADMIN') && (
             <>
-              <button className={`btn ${viewTab === 'reception' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('reception')}>
-                🏥 Reception Desk
+              <button
+                className={`nav-tab-btn ${viewTab === 'reception' ? 'active' : ''}`}
+                onClick={() => setViewTab('reception')}
+              >
+                Reception Desk
               </button>
-              <button className={`btn ${viewTab === 'settlement' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('settlement')}>
-                🏁 Day-End Settlement
+              <button
+                className={`nav-tab-btn ${viewTab === 'settlement' ? 'active' : ''}`}
+                onClick={() => setViewTab('settlement')}
+              >
+                Day Settlement
               </button>
-              <button className={`btn ${viewTab === 'billing' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('billing')}>
-                💳 Billing & Refunds
+              <button
+                className={`nav-tab-btn ${viewTab === 'billing' ? 'active' : ''}`}
+                onClick={() => setViewTab('billing')}
+              >
+                Billing & Refunds
               </button>
             </>
           )}
@@ -901,21 +1191,43 @@ export default function App() {
           {/* Analytics & Intelligence Views */}
           {(currentRole === 'STAFF' || currentRole === 'DOCTOR' || currentRole === 'ADMIN') && (
             <>
-              <button className={`btn ${viewTab === 'analytics' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('analytics')}>
-                📊 Analytics
+              <button
+                className={`nav-tab-btn ${viewTab === 'analytics' ? 'active' : ''}`}
+                onClick={() => setViewTab('analytics')}
+              >
+                Analytics
               </button>
-              <button className={`btn ${viewTab === 'intelligence' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('intelligence')}>
-                🧠 AI Intelligence
+              <button
+                className={`nav-tab-btn ${viewTab === 'intelligence' ? 'active' : ''}`}
+                onClick={() => setViewTab('intelligence')}
+              >
+                AI Insights
               </button>
             </>
           )}
 
+          {/* Admin Governance View (Phase 15) */}
+          {currentRole === 'ADMIN' && (
+            <button
+              className={`nav-tab-btn ${viewTab === 'governance' ? 'active' : ''}`}
+              onClick={() => setViewTab('governance')}
+            >
+              Governance Plane
+            </button>
+          )}
+
           {/* Public Kiosk Display (All Roles & Guest) */}
-          <button className={`btn ${viewTab === 'public_display' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setViewTab('public_display')}>
-            📺 Public Display
+          <button
+            className={`nav-tab-btn ${viewTab === 'public_display' ? 'active' : ''}`}
+            onClick={() => setViewTab('public_display')}
+          >
+            Public Display
           </button>
         </div>
-      </header>
+      </nav>
+
+      {/* Main Application Container Canvas */}
+      <main className="app-container">
 
       {/* VIEW: Doctor Examination Cockpit (Phase 13) */}
       {viewTab === 'doctor_cockpit' && (
@@ -1084,80 +1396,272 @@ export default function App() {
       {/* VIEW: Find / Discover Doctors */}
       {viewTab === 'discover' && (
         <div className="discovery-layout">
-          {/* Location Banner */}
-          <div className="location-banner">
-            <div className="location-info">
-              <span>📍</span>
-              <span>{locStatus}</span>
+          {/* Healthcare SaaS Hero Section */}
+          <section className="hero-section">
+            <div className="hero-pill">
+              <IconPulse />
+              <span>Intelligent Healthcare Queue OS</span>
             </div>
-            <button className="btn btn-secondary" onClick={handleGetLocation}>
-              Use Current Location
-            </button>
-          </div>
+            <h1 className="hero-title">
+              Precision Care, <span className="hero-title-gradient">Zero Wait-Room Friction.</span>
+            </h1>
+            <p className="hero-subtitle">
+              Discover verified medical specialists, monitor live consultation pacing in real time, and check in effortlessly from anywhere.
+            </p>
+            <div className="hero-trust-bar">
+              <div className="trust-item">
+                <IconShield />
+                <span>Verified Specialists</span>
+              </div>
+              <div className="trust-item">
+                <IconActivity />
+                <span>Live Telemetry & AI Pacing</span>
+              </div>
+              <div className="trust-item">
+                <IconClock />
+                <span>Synchronized Clinic Queues</span>
+              </div>
+            </div>
+          </section>
 
-          {/* Specialties Filter Chips */}
-          <div className="categories-bar">
-            <button className={`category-chip ${selectedSpecialty === '' ? 'active' : ''}`} onClick={() => setSelectedSpecialty('')}>
-              All Specialties
-            </button>
-            {specialties.map((s) => (
-              <button key={s._id} className={`category-chip ${selectedSpecialty === s._id ? 'active' : ''}`} onClick={() => setSelectedSpecialty(s._id)}>
-                {s.name}
+          {/* Discovery Command Surface */}
+          <div className="discovery-controls-card">
+            {/* Contextual Geolocation Bar */}
+            <div className="location-row">
+              <div className="location-meta">
+                <div className="location-icon-box">
+                  <IconLocation />
+                </div>
+                <div className="location-text-col">
+                  <span className="location-label">Your Location</span>
+                  <span className="location-status-text">{locStatus}</span>
+                </div>
+              </div>
+              <button
+                className="btn btn-secondary"
+                onClick={handleGetLocation}
+                disabled={locLoading}
+              >
+                {locLoading ? (
+                  <>
+                    <span className="status-dot-pulse" style={{ background: 'var(--primary-light)' }} />
+                    Detecting GPS...
+                  </>
+                ) : (
+                  <>
+                    <IconLocation />
+                    <span>Use Current Location</span>
+                  </>
+                )}
               </button>
-            ))}
+            </div>
+
+            {/* Specialties Filter Chips */}
+            <div className="specialties-section">
+              <div className="specialties-header">
+                <span>Browse By Clinical Specialty</span>
+                {selectedSpecialty && (
+                  <button
+                    className="btn btn-ghost"
+                    style={{ padding: '0.1rem 0.5rem', fontSize: '0.72rem' }}
+                    onClick={() => setSelectedSpecialty('')}
+                  >
+                    Clear Filter
+                  </button>
+                )}
+              </div>
+              <div className="categories-bar">
+                <button
+                  className={`category-chip ${selectedSpecialty === '' ? 'active' : ''}`}
+                  onClick={() => setSelectedSpecialty('')}
+                >
+                  All Specialties
+                </button>
+                {specialties.map((s) => (
+                  <button
+                    key={s._id}
+                    className={`category-chip ${selectedSpecialty === s._id ? 'active' : ''}`}
+                    onClick={() => setSelectedSpecialty(s._id)}
+                  >
+                    {s.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Precision Filter Toolbar */}
+            <div className="filters-panel">
+              <div className="filter-group">
+                <label className="filter-label">Sort Priority</label>
+                <select className="filter-select" value={sort} onChange={(e) => setSort(e.target.value)}>
+                  <option value="rating">★ Highest Rated</option>
+                  <option value="experience">🎖 Most Experienced</option>
+                  {coords && <option value="nearest">📍 Nearest Distance</option>}
+                </select>
+              </div>
+              <div className="filter-group">
+                <label className="filter-label">Minimum Rating</label>
+                <select className="filter-select" value={minRating} onChange={(e) => setMinRating(e.target.value)}>
+                  <option value="">Any Rating</option>
+                  <option value="4.5">★ 4.5+ Stars</option>
+                  <option value="4.0">★ 4.0+ Stars</option>
+                  <option value="3.5">★ 3.5+ Stars</option>
+                </select>
+              </div>
+              <div className="filter-group">
+                <label className="filter-label">Max Consultation Fee</label>
+                <input
+                  type="number"
+                  className="filter-input"
+                  placeholder="e.g. ₹1000"
+                  value={maxFee}
+                  onChange={(e) => setMaxFee(e.target.value)}
+                />
+              </div>
+            </div>
           </div>
 
-          {/* Filters Panel */}
-          <div className="filters-panel">
-            <div className="filter-group">
-              <label className="filter-label">Sort By</label>
-              <select className="filter-input" value={sort} onChange={(e) => setSort(e.target.value)}>
-                <option value="rating">Highest Rated</option>
-                <option value="experience">Most Experienced</option>
-                {coords && <option value="nearest">Nearest</option>}
-              </select>
-            </div>
-            <div className="filter-group">
-              <label className="filter-label">Min Rating</label>
-              <select className="filter-input" value={minRating} onChange={(e) => setMinRating(e.target.value)}>
-                <option value="">Any</option>
-                <option value="4.5">4.5+ Stars</option>
-                <option value="4.0">4.0+ Stars</option>
-                <option value="3.5">3.5+ Stars</option>
-              </select>
-            </div>
-            <div className="filter-group">
-              <label className="filter-label">Max Fee (₹)</label>
-              <input type="number" className="filter-input" placeholder="e.g. 1000" value={maxFee} onChange={(e) => setMaxFee(e.target.value)} />
+          {/* Results Summary Bar */}
+          <div className="results-header-row">
+            <div className="results-count-title">
+              <span>Available Practitioners</span>
+              {!loading && !error && (
+                <span className="results-count-badge">
+                  {doctors.length} {doctors.length === 1 ? 'doctor' : 'doctors'}
+                </span>
+              )}
             </div>
           </div>
 
-          {/* Doctors List */}
+          {/* Doctors Grid / Shimmer / Empty State */}
           {loading ? (
-            <div className="empty-state">Loading doctors...</div>
-          ) : error ? (
-            <div className="empty-state">{error}</div>
-          ) : doctors.length === 0 ? (
-            <div className="empty-state">No doctors match your search criteria.</div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
-              {doctors.map((d) => (
-                <div key={d._id} className="card" style={{ padding: '1rem', background: '#090d16', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                  <h3 style={{ fontSize: '1.1rem', margin: '0 0 0.5rem 0', color: 'var(--text-main)' }}>{d.fullName}</h3>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--primary)', marginBottom: '0.5rem' }}>{d.specialty?.name || 'General'}</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
-                    {d.clinic?.name} • ₹{d.consultationFee} • {d.experienceYears} yrs exp • ⭐ {d.averageRating?.toFixed(1) || '0.0'}
+            <div className="doctors-grid">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className="skeleton-card">
+                  <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.25rem' }}>
+                    <div className="skeleton-shimmer" style={{ width: 56, height: 56, borderRadius: 'var(--radius-lg)' }} />
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <div className="skeleton-shimmer" style={{ height: 18, width: '70%' }} />
+                      <div className="skeleton-shimmer" style={{ height: 14, width: '45%' }} />
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => handleOpenProfile(d._id)}>
-                      View Profile
-                    </button>
-                    <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => handleProceedToAppointment(d)}>
-                      Book Slot
-                    </button>
+                  <div className="skeleton-shimmer" style={{ height: 60, marginBottom: '1.25rem' }} />
+                  <div style={{ display: 'flex', gap: '0.75rem' }}>
+                    <div className="skeleton-shimmer" style={{ height: 38, flex: 1 }} />
+                    <div className="skeleton-shimmer" style={{ height: 38, flex: 1 }} />
                   </div>
                 </div>
               ))}
+            </div>
+          ) : error ? (
+            <div className="empty-state-card">
+              <div className="empty-state-icon" style={{ color: 'var(--status-danger)', background: 'rgba(239, 68, 68, 0.1)' }}>
+                <IconShield />
+              </div>
+              <div className="empty-state-title">Unable to Load Doctors</div>
+              <div className="empty-state-desc">{error}</div>
+              <button className="btn btn-secondary" onClick={loadDiscovery}>
+                Try Again
+              </button>
+            </div>
+          ) : doctors.length === 0 ? (
+            <div className="empty-state-card">
+              <div className="empty-state-icon">
+                <IconSearch />
+              </div>
+              <div className="empty-state-title">No Practitioners Found</div>
+              <div className="empty-state-desc">
+                We couldn't find any medical specialists matching your active filters. Try resetting the filters or widening your distance criteria.
+              </div>
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  setSelectedSpecialty('');
+                  setMinRating('');
+                  setMaxFee('');
+                  setSort('rating');
+                }}
+              >
+                Reset All Filters
+              </button>
+            </div>
+          ) : (
+            <div className="doctors-grid">
+              {doctors.map((d) => {
+                const initials = d.fullName
+                  ? d.fullName.replace(/^Dr\.?\s*/i, '').split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()
+                  : 'DR';
+                return (
+                  <div key={d._id} className="doctor-card">
+                    <div>
+                      <div className="doctor-card-top">
+                        <div className="doctor-avatar-wrapper">
+                          <div className="doctor-avatar-img">
+                            {initials}
+                          </div>
+                          <span className="doctor-avail-indicator" title="Accepting Appointments" />
+                        </div>
+                        <div className="doctor-info-primary">
+                          <div className="doc-name">{d.fullName}</div>
+                          <span className="doc-specialty-badge">
+                            {d.specialty?.name || 'General Practice'}
+                          </span>
+                          <div className="doc-clinic-name">
+                            <IconLocation />
+                            <span>{d.clinic?.name || 'Main Clinic Center'}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Doctor Metrics Grid */}
+                      <div className="doctor-metrics-grid">
+                        <div className="metric-pill">
+                          <span className="metric-pill-label">Rating</span>
+                          <span className="metric-pill-value">
+                            <span className="rating-star-icon">★</span>
+                            {d.averageRating ? d.averageRating.toFixed(1) : '5.0'}
+                          </span>
+                        </div>
+                        <div className="metric-pill">
+                          <span className="metric-pill-label">Experience</span>
+                          <span className="metric-pill-value">
+                            {d.experienceYears ? `${d.experienceYears} yrs` : '5+ yrs'}
+                          </span>
+                        </div>
+                        <div className="metric-pill">
+                          <span className="metric-pill-label">Consultation</span>
+                          <span className="metric-pill-value" style={{ color: 'var(--primary-light)' }}>
+                            ₹{d.consultationFee ?? 500}
+                          </span>
+                        </div>
+                        <div className="metric-pill">
+                          <span className="metric-pill-label">Queue Pacing</span>
+                          <span className="metric-pill-value" style={{ color: 'var(--status-success)', fontSize: '0.8rem' }}>
+                            <IconPulse /> Active
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="doctor-actions-row">
+                      <button
+                        className="btn btn-secondary"
+                        style={{ flex: 1 }}
+                        onClick={() => handleOpenProfile(d._id)}
+                      >
+                        Profile
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        style={{ flex: 1.3 }}
+                        onClick={() => handleProceedToAppointment(d)}
+                      >
+                        Book Slot
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1550,7 +2054,27 @@ export default function App() {
                   <strong>Settlement Status:</strong> {settlementPreview.isClosed ? '✓ CLINIC DAY CLOSED' : '⏳ OPEN FOR VISITS'} (Date: {settlementPreview.date})
                 </div>
                 {settlementPreview.isClosed && (
-                  <span style={{ fontSize: '0.8rem', color: '#6ee7b7' }}>Authoritative daily settlement document recorded</span>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.8rem', color: '#6ee7b7' }}>Authoritative daily settlement document recorded</span>
+                    {settlementPreview.settlement?._id && (
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                        disabled={exportLoadingId === settlementPreview.settlement._id}
+                        onClick={() => handleExportSettlementCSV(settlementPreview.settlement._id)}
+                      >
+                        {exportLoadingId === settlementPreview.settlement._id ? 'Exporting...' : '📥 Export Settlement CSV'}
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                      disabled={invoicesExportLoading}
+                      onClick={() => handleExportInvoicesCSV(settlementPreview.clinicId || authSession?.user?.staffClinicId, settlementPreview.date)}
+                    >
+                      {invoicesExportLoading ? 'Exporting...' : '📥 Export Invoices CSV'}
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -1669,7 +2193,15 @@ export default function App() {
                         </div>
                         <div style={{ textAlign: 'right', fontSize: '0.85rem' }}>
                           <div>Tokens: {s.metrics?.totalTokensIssued || 0} | Served: {s.metrics?.completedVisits || 0} | Expired: {s.metrics?.expiredVisits || 0}</div>
-                          <div style={{ color: 'var(--primary)' }}>Revenue Collected: ₹{s.metrics?.totalRevenueCollected || 0}</div>
+                          <div style={{ color: 'var(--primary)', marginBottom: '0.25rem' }}>Revenue Collected: ₹{s.metrics?.totalRevenueCollected || 0}</div>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                            disabled={exportLoadingId === s._id}
+                            onClick={() => handleExportSettlementCSV(s._id)}
+                          >
+                            {exportLoadingId === s._id ? 'Exporting...' : '📥 Export CSV'}
+                          </button>
                         </div>
                       </div>
                     ))}
@@ -1720,37 +2252,89 @@ export default function App() {
 
       {/* VIEW: Public Queue Display Board */}
       {viewTab === 'public_display' && (
-        <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
-          <h2>📺 Anonymous Public Queue Display Board</h2>
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
-            <input
-              type="text"
-              className="filter-input"
-              placeholder="Enter Clinic ID..."
-              value={publicClinicId}
-              onChange={(e) => setPublicClinicId(e.target.value)}
-            />
-            <button className="btn btn-primary" onClick={loadPublicDisplay}>
-              Load Display Feed
-            </button>
+        <div className="card" style={{ padding: '2rem', maxWidth: '1000px', margin: '0 auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '2rem', borderBottom: '1px solid var(--border-default)', paddingBottom: '1.25rem' }}>
+            <div>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.75rem', borderRadius: 'var(--radius-full)', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.25)', color: 'var(--status-success)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>
+                <span className="status-dot-pulse" />
+                <span>Live Broadcast Kiosk</span>
+              </div>
+              <h2 style={{ fontSize: '1.6rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
+                Waiting Room Public Display
+              </h2>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                HIPAA/privacy-compliant real-time queue tracker for clinic waiting room monitors
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+              <input
+                type="text"
+                className="filter-input"
+                placeholder="Enter Clinic ID..."
+                value={publicClinicId}
+                onChange={(e) => setPublicClinicId(e.target.value)}
+                style={{ minWidth: '240px' }}
+              />
+              <button className="btn btn-primary" onClick={loadPublicDisplay}>
+                Connect Feed
+              </button>
+            </div>
           </div>
 
-          {publicDisplayData && (
-            <div style={{ background: '#090d16', padding: '1.5rem', borderRadius: '12px', textAlign: 'center' }}>
-              <h3 style={{ color: 'var(--primary)' }}>{publicDisplayData.clinicName || 'Clinic Public Display'}</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
-                <div style={{ background: '#1e293b', padding: '1rem', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Now Serving</div>
-                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: 'var(--primary)' }}>
+          {publicDisplayData ? (
+            <div>
+              <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>Active Clinic Station</span>
+                <h3 style={{ fontSize: '1.8rem', color: 'var(--primary-light)', margin: '0.25rem 0 0 0', fontWeight: 700 }}>
+                  {publicDisplayData.clinicName || 'Clinic Public Display'}
+                </h3>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+                {/* Now Serving Card */}
+                <div style={{ background: 'var(--surface-ground)', border: '2px solid rgba(14, 165, 233, 0.4)', borderRadius: 'var(--radius-xl)', padding: '2rem', textAlign: 'center', boxShadow: '0 0 30px -5px rgba(14, 165, 233, 0.2)' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: 'var(--primary-light)', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>
+                    <IconPulse />
+                    <span>Now Serving</span>
+                  </div>
+                  <div style={{ fontSize: '4.5rem', fontWeight: 900, color: '#ffffff', letterSpacing: '-0.03em', lineHeight: 1.1, margin: '0.5rem 0', textShadow: '0 0 30px rgba(56, 189, 248, 0.4)' }}>
                     #{publicDisplayData.currentServingToken || 'IDLE'}
                   </div>
-                </div>
-                <div style={{ background: '#1e293b', padding: '1rem', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Total Waiting</div>
-                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#eab308' }}>
-                    {publicDisplayData.totalWaiting || 0}
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    {publicDisplayData.currentServingToken ? 'Please proceed to designated exam room' : 'Exam rooms currently preparing'}
                   </div>
                 </div>
+
+                {/* Total Waiting Card */}
+                <div style={{ background: 'var(--surface-ground)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '2rem', textAlign: 'center' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: '#fbbf24', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>
+                    <IconClock />
+                    <span>Waiting in Queue</span>
+                  </div>
+                  <div style={{ fontSize: '4.5rem', fontWeight: 900, color: '#fbbf24', letterSpacing: '-0.03em', lineHeight: 1.1, margin: '0.5rem 0' }}>
+                    {publicDisplayData.totalWaiting || 0}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    Patients currently checked in today
+                  </div>
+                </div>
+              </div>
+
+              {/* Kiosk Footer Notice */}
+              <div style={{ textAlign: 'center', padding: '1rem', background: 'var(--surface-elevated)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', color: 'var(--text-dim)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                <IconShield />
+                <span>Patient names are strictly masked to ensure compliance with medical confidentiality standards. Check token on your mobile pass.</span>
+              </div>
+            </div>
+          ) : (
+            <div className="empty-state-card" style={{ margin: '1rem auto' }}>
+              <div className="empty-state-icon">
+                <IconActivity />
+              </div>
+              <div className="empty-state-title">Display Feed Not Connected</div>
+              <div className="empty-state-desc">
+                Enter your Clinic ID above and click "Connect Feed" to stream live token numbers to this display.
               </div>
             </div>
           )}
@@ -1788,6 +2372,385 @@ export default function App() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* VIEW: Admin Governance & Operational Audit (Phase 15) */}
+      {viewTab === 'governance' && currentRole === 'ADMIN' && (
+        <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <div>
+              <h2 style={{ margin: 0 }}>🛡️ Administrative Governance & Operational Audit</h2>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                Configure clinic operational policies, inspect immutable queue audit logs, and review financial reconciliations.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                className={`btn ${adminSubTab === 'policy' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: '0.85rem' }}
+                onClick={() => setAdminSubTab('policy')}
+              >
+                ⚙️ Clinic Policy
+              </button>
+              <button
+                className={`btn ${adminSubTab === 'queue_audit' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: '0.85rem' }}
+                onClick={() => setAdminSubTab('queue_audit')}
+              >
+                📜 Queue Audit Trail
+              </button>
+              <button
+                className={`btn ${adminSubTab === 'financial_audit' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: '0.85rem' }}
+                onClick={() => setAdminSubTab('financial_audit')}
+              >
+                💰 Financial Audit
+              </button>
+            </div>
+          </div>
+
+          {/* Clinic Selector / Context */}
+          <div style={{ background: '#090d16', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Target Clinic ID:</span>
+            <input
+              type="text"
+              className="filter-input"
+              style={{ maxWidth: '320px', padding: '0.35rem 0.6rem', fontSize: '0.85rem' }}
+              placeholder="Enter or paste Clinic ObjectId..."
+              value={governanceClinicId}
+              onChange={(e) => setGovernanceClinicId(e.target.value)}
+            />
+            <button
+              className="btn btn-secondary"
+              style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+              onClick={() => {
+                if (adminSubTab === 'policy') loadClinicPolicy(governanceClinicId);
+                if (adminSubTab === 'queue_audit') loadQueueAuditLogs(1);
+                if (adminSubTab === 'financial_audit') loadFinancialAuditLogs(1);
+              }}
+            >
+              🔄 Refresh Data
+            </button>
+          </div>
+
+          {/* SUB-TAB 1: Clinic Operational Policy */}
+          {adminSubTab === 'policy' && (
+            <div style={{ background: '#090d16', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.15rem' }}>⚙️ Clinic Operational & Arrival Policies</h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
+                Tune patient arrival windows and settlement lifecycle parameters. Changes take effect immediately on incoming self-check-ins.
+              </p>
+
+              {policyMessage && (
+                <div style={{ background: policyMessage.includes('✓') ? '#064e3b' : '#451a03', border: `1px solid ${policyMessage.includes('✓') ? '#10b981' : '#f59e0b'}`, padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                  {policyMessage}
+                </div>
+              )}
+
+              <form onSubmit={handleSaveClinicPolicy} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: '600px' }}>
+                <div>
+                  <label style={{ display: 'block', fontWeight: 'bold', fontSize: '0.85rem', marginBottom: '0.25rem' }}>
+                    Self-Check-In Lead Window (Minutes Before Slot):
+                  </label>
+                  <input
+                    type="number"
+                    min="15"
+                    max="180"
+                    className="filter-input"
+                    value={clinicPolicyForm.selfCheckInLeadMinutes}
+                    onChange={(e) => setClinicPolicyForm({ ...clinicPolicyForm, selfCheckInLeadMinutes: e.target.value })}
+                    required
+                  />
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Allowed range: 15–180 minutes. Default: 60 minutes.
+                  </span>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontWeight: 'bold', fontSize: '0.85rem', marginBottom: '0.25rem' }}>
+                    Self-Check-In Grace Period (Minutes After Slot):
+                  </label>
+                  <input
+                    type="number"
+                    min="5"
+                    max="120"
+                    className="filter-input"
+                    value={clinicPolicyForm.selfCheckInGraceMinutes}
+                    onChange={(e) => setClinicPolicyForm({ ...clinicPolicyForm, selfCheckInGraceMinutes: e.target.value })}
+                    required
+                  />
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Allowed range: 5–120 minutes. Default: 30 minutes.
+                  </span>
+                </div>
+
+                <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={clinicPolicyForm.autoExpireOnSettlement}
+                      onChange={(e) => setClinicPolicyForm({ ...clinicPolicyForm, autoExpireOnSettlement: e.target.checked })}
+                    />
+                    <strong>Auto-expire unserved entries during day-end closure</strong>
+                  </label>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '1.5rem', display: 'block' }}>
+                    When enabled, closing the clinic day transitions waiting and skipped entries to EXPIRED status.
+                  </span>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontWeight: 'bold', fontSize: '0.85rem', marginBottom: '0.25rem' }}>
+                    Queue Policy Metadata:
+                  </label>
+                  <select
+                    className="filter-input"
+                    value={clinicPolicyForm.queuePolicy}
+                    onChange={(e) => setClinicPolicyForm({ ...clinicPolicyForm, queuePolicy: e.target.value })}
+                  >
+                    <option value="HYBRID">HYBRID (Phase 08 Deterministic Comparator — Authoritative)</option>
+                    <option value="FIFO">FIFO (Config Metadata)</option>
+                    <option value="APPOINTMENT_PRIORITY">APPOINTMENT_PRIORITY (Config Metadata)</option>
+                  </select>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Note: Queue engine ordering remains authoritative and frozen per Phase 08 specification.
+                  </span>
+                </div>
+
+                <button type="submit" className="btn btn-primary" disabled={policyLoading} style={{ alignSelf: 'flex-start' }}>
+                  {policyLoading ? 'Saving Policy...' : '💾 Save Policy Settings'}
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* SUB-TAB 2: Queue Audit Trail */}
+          {adminSubTab === 'queue_audit' && (
+            <div style={{ background: '#090d16', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem' }}>📜 Operational Queue Audit Ledger</h3>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Immutable append-only record of all check-ins, triages, transfers, skips, and day-end expirations.
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <select
+                    className="filter-input"
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.6rem' }}
+                    value={queueAuditAction}
+                    onChange={(e) => setQueueAuditAction(e.target.value)}
+                  >
+                    <option value="">All Action Types</option>
+                    <option value="SELF_CHECK_IN">SELF_CHECK_IN</option>
+                    <option value="TRIAGE_ESCALATION">TRIAGE_ESCALATION</option>
+                    <option value="QUEUE_TRANSFER">QUEUE_TRANSFER</option>
+                    <option value="EXPIRED">EXPIRED</option>
+                    <option value="DAY_END_EXPIRED">DAY_END_EXPIRED</option>
+                    <option value="CHECK_IN">CHECK_IN (Walk-in)</option>
+                    <option value="CALL_NEXT">CALL_NEXT</option>
+                    <option value="START_CONSULTATION">START_CONSULTATION</option>
+                    <option value="COMPLETE">COMPLETE</option>
+                    <option value="SKIP">SKIP</option>
+                    <option value="NO_SHOW">NO_SHOW</option>
+                    <option value="CANCEL">CANCEL</option>
+                    <option value="REJOIN">REJOIN</option>
+                    <option value="PAUSE_QUEUE">PAUSE_QUEUE</option>
+                    <option value="RESUME_QUEUE">RESUME_QUEUE</option>
+                  </select>
+                  <button className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.35rem 0.6rem' }} onClick={() => loadQueueAuditLogs(1)}>
+                    Filter
+                  </button>
+                </div>
+              </div>
+
+              {queueAuditLoading ? (
+                <div className="empty-state">Loading queue audit records...</div>
+              ) : queueAuditLogs.length === 0 ? (
+                <div className="empty-state">No queue audit history matches the criteria.</div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: '0.5rem' }}>Timestamp</th>
+                        <th style={{ padding: '0.5rem' }}>Action</th>
+                        <th style={{ padding: '0.5rem' }}>Token</th>
+                        <th style={{ padding: '0.5rem' }}>Doctor</th>
+                        <th style={{ padding: '0.5rem' }}>Actor</th>
+                        <th style={{ padding: '0.5rem' }}>Details / Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {queueAuditLogs.map((log) => {
+                        let badgeColor = '#64748b';
+                        if (log.action === 'SELF_CHECK_IN') badgeColor = '#10b981';
+                        if (log.action === 'TRIAGE_ESCALATION') badgeColor = '#f59e0b';
+                        if (log.action === 'QUEUE_TRANSFER') badgeColor = '#3b82f6';
+                        if (log.action === 'EXPIRED' || log.action === 'DAY_END_EXPIRED') badgeColor = '#ef4444';
+                        if (log.action === 'COMPLETE') badgeColor = '#059669';
+
+                        return (
+                          <tr key={log._id} style={{ borderBottom: '1px solid #1e293b' }}>
+                            <td style={{ padding: '0.6rem 0.5rem', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
+                              {new Date(log.timestamp).toLocaleString()}
+                            </td>
+                            <td style={{ padding: '0.6rem 0.5rem' }}>
+                              <span style={{ background: badgeColor, color: '#fff', padding: '0.2rem 0.45rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold' }}>
+                                {log.action}
+                              </span>
+                            </td>
+                            <td style={{ padding: '0.6rem 0.5rem', fontWeight: 'bold' }}>
+                              {log.queueEntryId?.tokenNumber ? `#${log.queueEntryId.tokenNumber}` : '—'}
+                            </td>
+                            <td style={{ padding: '0.6rem 0.5rem' }}>
+                              {log.doctorId?.fullName || 'Doctor'}
+                            </td>
+                            <td style={{ padding: '0.6rem 0.5rem' }}>
+                              <div>{log.userRole}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{log.performedBy?.email || 'System'}</div>
+                            </td>
+                            <td style={{ padding: '0.6rem 0.5rem', color: 'var(--text-muted)' }}>
+                              {log.reason || `${log.previousState || 'NONE'} ➔ ${log.newState}`}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+
+                  {/* Pagination */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', fontSize: '0.85rem' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Showing {queueAuditLogs.length} of {queueAuditTotal} entries (Page {queueAuditPage})</span>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                        disabled={queueAuditPage <= 1}
+                        onClick={() => loadQueueAuditLogs(queueAuditPage - 1)}
+                      >
+                        ◀ Previous
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                        disabled={queueAuditLogs.length < 25}
+                        onClick={() => loadQueueAuditLogs(queueAuditPage + 1)}
+                      >
+                        Next ▶
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SUB-TAB 3: Financial Audit Trail */}
+          {adminSubTab === 'financial_audit' && (
+            <div style={{ background: '#090d16', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem' }}>💰 Financial & Payment Audit Trail</h3>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Immutable ledger of all invoice issues, payment settlements, and refund events.
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <select
+                    className="filter-input"
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.6rem' }}
+                    value={financialAuditAction}
+                    onChange={(e) => setFinancialAuditAction(e.target.value)}
+                  >
+                    <option value="">All Financial Events</option>
+                    <option value="INVOICE_CREATED">INVOICE_CREATED</option>
+                    <option value="INVOICE_ISSUED">INVOICE_ISSUED</option>
+                    <option value="PAYMENT_INITIATED">PAYMENT_INITIATED</option>
+                    <option value="PAYMENT_SUCCESS">PAYMENT_SUCCESS</option>
+                    <option value="PAYMENT_FAILED">PAYMENT_FAILED</option>
+                    <option value="REFUND_INITIATED">REFUND_INITIATED</option>
+                    <option value="REFUND_COMPLETED">REFUND_COMPLETED</option>
+                    <option value="INVOICE_CANCELLED">INVOICE_CANCELLED</option>
+                  </select>
+                  <button className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.35rem 0.6rem' }} onClick={() => loadFinancialAuditLogs(1)}>
+                    Filter
+                  </button>
+                </div>
+              </div>
+
+              {financialAuditLoading ? (
+                <div className="empty-state">Loading financial audit records...</div>
+              ) : financialAuditLogs.length === 0 ? (
+                <div className="empty-state">No financial audit records match the criteria.</div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: '0.5rem' }}>Timestamp</th>
+                        <th style={{ padding: '0.5rem' }}>Action</th>
+                        <th style={{ padding: '0.5rem' }}>Amount</th>
+                        <th style={{ padding: '0.5rem' }}>Actor</th>
+                        <th style={{ padding: '0.5rem' }}>Reference</th>
+                        <th style={{ padding: '0.5rem' }}>Reason / Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {financialAuditLogs.map((fLog) => (
+                        <tr key={fLog._id} style={{ borderBottom: '1px solid #1e293b' }}>
+                          <td style={{ padding: '0.6rem 0.5rem', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
+                            {new Date(fLog.timestamp).toLocaleString()}
+                          </td>
+                          <td style={{ padding: '0.6rem 0.5rem' }}>
+                            <span style={{ background: fLog.action.includes('SUCCESS') ? '#059669' : fLog.action.includes('REFUND') ? '#d97706' : '#475569', color: '#fff', padding: '0.2rem 0.45rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold' }}>
+                              {fLog.action}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.6rem 0.5rem', fontWeight: 'bold', color: 'var(--primary)' }}>
+                            ₹{fLog.amount ?? 0}
+                          </td>
+                          <td style={{ padding: '0.6rem 0.5rem' }}>
+                            <div>{fLog.actorRole}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{fLog.performedBy?.email || 'User'}</div>
+                          </td>
+                          <td style={{ padding: '0.6rem 0.5rem', fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                            {fLog.transactionReference || 'N/A'}
+                          </td>
+                          <td style={{ padding: '0.6rem 0.5rem', color: 'var(--text-muted)' }}>
+                            {fLog.reason || `${fLog.previousStatus || 'NONE'} ➔ ${fLog.newStatus}`}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {/* Pagination */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', fontSize: '0.85rem' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Showing {financialAuditLogs.length} of {financialAuditTotal} entries (Page {financialAuditPage})</span>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                        disabled={financialAuditPage <= 1}
+                        onClick={() => loadFinancialAuditLogs(financialAuditPage - 1)}
+                      >
+                        ◀ Previous
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                        disabled={financialAuditLogs.length < 25}
+                        onClick={() => loadFinancialAuditLogs(financialAuditPage + 1)}
+                      >
+                        Next ▶
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1844,39 +2807,69 @@ export default function App() {
       {/* Authentication & Registration Modal (Phase 13) */}
       {showAuthModal && (
         <div className="modal-overlay" onClick={() => setShowAuthModal(false)}>
-          <div className="modal-content" style={{ maxWidth: '420px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content" style={{ maxWidth: '440px' }} onClick={(e) => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setShowAuthModal(false)}>×</button>
-            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--primary)' }}>
-              {authMode === 'login' ? '🔑 Sign In to QFlow' : '📝 Create Patient Account'}
-            </h3>
+            <div className="auth-dialog-header">
+              <div style={{ width: 44, height: 44, borderRadius: 'var(--radius-lg)', background: 'var(--primary-gradient)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff', margin: '0 auto 0.75rem auto', boxShadow: '0 0 16px -2px rgba(14, 165, 233, 0.5)' }}>
+                <IconShield />
+              </div>
+              <h2 style={{ fontSize: '1.4rem', fontWeight: 700, margin: '0 0 0.35rem 0', color: 'var(--text-main)' }}>
+                {authMode === 'login' ? 'Sign In to QFlow' : 'Create Patient Account'}
+              </h2>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                {authMode === 'login'
+                  ? 'Access your appointments, live queue tokens, and consultations.'
+                  : 'Register for instant appointment booking and live queue tracking.'}
+              </div>
+            </div>
+
+            <div className="auth-tabs-row">
+              <button
+                type="button"
+                className={`auth-tab-btn ${authMode === 'login' ? 'active' : ''}`}
+                onClick={() => { setAuthMode('login'); setAuthError(null); }}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                className={`auth-tab-btn ${authMode === 'register' ? 'active' : ''}`}
+                onClick={() => { setAuthMode('register'); setAuthError(null); }}
+              >
+                Register
+              </button>
+            </div>
 
             {authError && (
-              <div style={{ background: '#450a0a', border: '1px solid #ef4444', color: '#fca5a5', padding: '0.5rem', borderRadius: '6px', fontSize: '0.8rem', marginBottom: '1rem' }}>
-                {authError}
+              <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#fca5a5', padding: '0.75rem', borderRadius: 'var(--radius-md)', fontSize: '0.82rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <IconShield />
+                <span>{authError}</span>
               </div>
             )}
 
-            <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {authMode === 'register' && (
                 <>
                   <div>
-                    <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Full Name</label>
+                    <label className="filter-label" style={{ marginBottom: '0.35rem', display: 'block' }}>Full Legal Name</label>
                     <input
                       type="text"
                       required
+                      placeholder="e.g. Sarah Jenkins"
                       className="filter-input"
-                      style={{ width: '100%', marginTop: '0.25rem' }}
+                      style={{ width: '100%' }}
                       value={authForm.fullName}
                       onChange={(e) => setAuthForm({ ...authForm, fullName: e.target.value })}
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Phone Number</label>
+                    <label className="filter-label" style={{ marginBottom: '0.35rem', display: 'block' }}>Phone Number</label>
                     <input
                       type="tel"
                       required
+                      placeholder="e.g. +91 98765 43210"
                       className="filter-input"
-                      style={{ width: '100%', marginTop: '0.25rem' }}
+                      style={{ width: '100%' }}
                       value={authForm.phone}
                       onChange={(e) => setAuthForm({ ...authForm, phone: e.target.value })}
                     />
@@ -1885,47 +2878,54 @@ export default function App() {
               )}
 
               <div>
-                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Email Address</label>
+                <label className="filter-label" style={{ marginBottom: '0.35rem', display: 'block' }}>Email Address</label>
                 <input
                   type="email"
                   required
+                  placeholder="name@example.com"
                   className="filter-input"
-                  style={{ width: '100%', marginTop: '0.25rem' }}
+                  style={{ width: '100%' }}
                   value={authForm.email}
                   onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
                 />
               </div>
 
               <div>
-                <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Password</label>
+                <label className="filter-label" style={{ marginBottom: '0.35rem', display: 'block' }}>Password</label>
                 <input
                   type="password"
                   required
+                  placeholder="••••••••••••"
                   className="filter-input"
-                  style={{ width: '100%', marginTop: '0.25rem' }}
+                  style={{ width: '100%' }}
                   value={authForm.password}
                   onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
                 />
               </div>
 
-              <button type="submit" disabled={authLoading} className="btn btn-primary" style={{ marginTop: '0.5rem' }}>
-                {authLoading ? 'Authenticating...' : authMode === 'login' ? 'Sign In' : 'Create Account'}
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="btn btn-primary"
+                style={{ width: '100%', padding: '0.75rem', marginTop: '0.5rem', fontSize: '0.9rem' }}
+              >
+                {authLoading ? 'Authenticating...' : authMode === 'login' ? 'Sign In to Workspace' : 'Create My Account'}
               </button>
             </form>
 
-            <div style={{ textAlign: 'center', marginTop: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            <div style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
               {authMode === 'login' ? (
                 <span>
-                  Don't have an account?{' '}
-                  <button style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 0 }} onClick={() => { setAuthMode('register'); setAuthError(null); }}>
-                    Register here
+                  New patient?{' '}
+                  <button style={{ background: 'none', border: 'none', color: 'var(--primary-light)', cursor: 'pointer', padding: 0, fontWeight: 600 }} onClick={() => { setAuthMode('register'); setAuthError(null); }}>
+                    Create account here
                   </button>
                 </span>
               ) : (
                 <span>
                   Already registered?{' '}
-                  <button style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: 0 }} onClick={() => { setAuthMode('login'); setAuthError(null); }}>
-                    Sign in here
+                  <button style={{ background: 'none', border: 'none', color: 'var(--primary-light)', cursor: 'pointer', padding: 0, fontWeight: 600 }} onClick={() => { setAuthMode('login'); setAuthError(null); }}>
+                    Sign in to your account
                   </button>
                 </span>
               )}
@@ -1937,14 +2937,26 @@ export default function App() {
       {/* Stage 2 Doctor Profile Modal */}
       {selectedDoctor && profileData && (
         <div className="modal-overlay" onClick={() => setSelectedDoctor(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content" style={{ maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setSelectedDoctor(null)}>×</button>
-            <h2>Dr. {profileData.fullName}</h2>
-            <p style={{ color: 'var(--primary)' }}>{profileData.specialty?.name}</p>
-            <p>{profileData.qualifications?.join(', ')} • {profileData.experienceYears} Years Experience</p>
-            <p>Fee: ₹{profileData.consultationFee}</p>
-            <button className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }} onClick={() => handleProceedToAppointment(selectedDoctor)}>
-              Proceed to Book Appointment
+            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <div style={{ width: 56, height: 56, borderRadius: 'var(--radius-lg)', background: 'var(--surface-elevated)', border: '2px solid var(--border-default)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', fontWeight: 700, color: 'var(--primary-light)' }}>
+                {profileData.fullName ? profileData.fullName.replace(/^Dr\.?\s*/i, '').split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() : 'DR'}
+              </div>
+              <div>
+                <h2 style={{ fontSize: '1.3rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>Dr. {profileData.fullName}</h2>
+                <span className="doc-specialty-badge">{profileData.specialty?.name || 'General Practice'}</span>
+              </div>
+            </div>
+
+            <div style={{ background: 'var(--surface-ground)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: '1rem', marginBottom: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.85rem' }}>
+              <div><strong>Qualifications:</strong> {profileData.qualifications?.join(', ') || 'MBBS'}</div>
+              <div><strong>Clinical Experience:</strong> {profileData.experienceYears} Years</div>
+              <div><strong>Consultation Fee:</strong> <span style={{ color: 'var(--primary-light)', fontWeight: 700 }}>₹{profileData.consultationFee}</span></div>
+            </div>
+
+            <button className="btn btn-primary" style={{ width: '100%', padding: '0.75rem' }} onClick={() => handleProceedToAppointment(selectedDoctor)}>
+              Proceed to Book Appointment →
             </button>
           </div>
         </div>
@@ -1953,32 +2965,49 @@ export default function App() {
       {/* Stage 3 Booking Modal */}
       {bookingDoctor && (
         <div className="modal-overlay" onClick={() => setBookingDoctor(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content" style={{ maxWidth: '560px' }} onClick={(e) => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setBookingDoctor(null)}>×</button>
-            <h2>Book Appointment — Dr. {bookingDoctor.fullName}</h2>
-            <input type="date" className="filter-input" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} style={{ width: '100%', margin: '1rem 0' }} />
-            {loadingAvail ? (
-              <p>Checking slots...</p>
-            ) : availability?.availableSlots?.length > 0 ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: '0.5rem', marginBottom: '1rem' }}>
-                {availability.availableSlots.map((slot) => (
-                  <button
-                    key={slot}
-                    className={`btn ${selectedSlot === slot ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ fontSize: '0.8rem', padding: '0.4rem' }}
-                    onClick={() => setSelectedSlot(slot)}
-                  >
-                    {slot}
-                  </button>
-                ))}
+            <h2 style={{ fontSize: '1.3rem', fontWeight: 700, margin: '0 0 0.5rem 0' }}>Book Consultation Slot</h2>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
+              Select your appointment date and preferred consultation time with <strong>Dr. {bookingDoctor.fullName}</strong>.
+            </div>
+
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label className="filter-label" style={{ marginBottom: '0.35rem', display: 'block' }}>Consultation Date</label>
+              <input type="date" className="filter-input" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} style={{ width: '100%' }} />
+            </div>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label className="filter-label" style={{ marginBottom: '0.5rem', display: 'block' }}>Available Slots</label>
+              {loadingAvail ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Checking clinic calendar slots...</div>
+              ) : availability?.availableSlots?.length > 0 ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))', gap: '0.5rem' }}>
+                  {availability.availableSlots.map((slot) => (
+                    <button
+                      key={slot}
+                      className={`btn ${selectedSlot === slot ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ fontSize: '0.8rem', padding: '0.45rem 0.6rem' }}
+                      onClick={() => setSelectedSlot(slot)}
+                    >
+                      {slot}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', background: 'var(--surface-ground)', padding: '1rem', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
+                  No available slots found for this date. Please choose another date.
+                </div>
+              )}
+            </div>
+
+            {bookingError && (
+              <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#fca5a5', padding: '0.75rem', borderRadius: 'var(--radius-md)', fontSize: '0.82rem', marginBottom: '1rem' }}>
+                {bookingError}
               </div>
-            ) : (
-              <p style={{ color: 'var(--text-muted)' }}>No slots available for this date.</p>
             )}
 
-            {bookingError && <p style={{ color: '#ef4444' }}>{bookingError}</p>}
-
-            <button className="btn btn-primary" style={{ width: '100%' }} disabled={!selectedSlot} onClick={handleConfirmBooking}>
+            <button className="btn btn-primary" style={{ width: '100%', padding: '0.75rem' }} disabled={!selectedSlot} onClick={handleConfirmBooking}>
               Confirm Booking ({selectedSlot || 'Select a slot'})
             </button>
           </div>
@@ -1986,29 +3015,30 @@ export default function App() {
       )}
 
       {/* Developer Collapsible Toolbar (Preserved for Testing & Backward Compatibility) */}
-      <details style={{ marginTop: '3rem', padding: '0.75rem', background: 'rgba(15, 23, 42, 0.4)', borderRadius: '8px', border: '1px solid var(--border)' }}>
-        <summary style={{ cursor: 'pointer', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+      <details className="developer-tools-drawer">
+        <summary>
           🛠️ Developer Tools & Raw JWT Token Inspector (Collapsible)
         </summary>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.75rem', fontSize: '0.75rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem', marginTop: '1rem', fontSize: '0.75rem' }}>
           <div>
-            <span>Patient Token:</span>
+            <span style={{ color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem' }}>Patient Token:</span>
             <input type="text" className="filter-input" style={{ width: '100%' }} value={patientToken} onChange={(e) => setPatientToken(e.target.value)} />
           </div>
           <div>
-            <span>Staff Token:</span>
+            <span style={{ color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem' }}>Staff Token:</span>
             <input type="text" className="filter-input" style={{ width: '100%' }} value={staffToken} onChange={(e) => setStaffToken(e.target.value)} />
           </div>
           <div>
-            <span>Doctor Token:</span>
+            <span style={{ color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem' }}>Doctor Token:</span>
             <input type="text" className="filter-input" style={{ width: '100%' }} value={doctorToken} onChange={(e) => setDoctorToken(e.target.value)} />
           </div>
           <div>
-            <span>Admin Token:</span>
+            <span style={{ color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem' }}>Admin Token:</span>
             <input type="text" className="filter-input" style={{ width: '100%' }} value={adminToken} onChange={(e) => setAdminToken(e.target.value)} />
           </div>
         </div>
       </details>
+      </main>
     </div>
   );
 }

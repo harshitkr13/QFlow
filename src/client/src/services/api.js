@@ -767,6 +767,129 @@ export const fetchDailySettlements = async (params = {}, token) => {
   }
 };
 
+// ----------------------------------------------------
+// Phase 15: Exports, Auditing & Operational Governance
+// ----------------------------------------------------
+
+export const downloadSettlementCSV = async (settlementId, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/staff/reconciliation/settlements/${settlementId}/export`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({ message: 'Failed to download settlement CSV' }));
+      return { ok: false, status: response.status, error: errData.message || 'Download failed' };
+    }
+    const blob = await response.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = `settlement-${settlementId}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+    return { ok: true, status: 200 };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message || 'Failed to download settlement CSV' };
+  }
+};
+
+export const downloadInvoicesCSV = async (clinicId, date, token) => {
+  try {
+    const query = new URLSearchParams();
+    if (clinicId) query.append('clinicId', clinicId);
+    if (date) query.append('date', date);
+
+    const response = await fetch(`${API_BASE_URL}/staff/reconciliation/invoices/export?${query.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({ message: 'Failed to download invoices CSV' }));
+      return { ok: false, status: response.status, error: errData.message || 'Download failed' };
+    }
+    const blob = await response.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = `invoices-${clinicId}-${date || 'export'}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+    return { ok: true, status: 200 };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message || 'Failed to download invoices CSV' };
+  }
+};
+
+export const fetchQueueAuditHistory = async (params = {}, token) => {
+  try {
+    const query = new URLSearchParams();
+    Object.keys(params).forEach((key) => {
+      if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+        query.append(key, params[key]);
+      }
+    });
+
+    const response = await fetch(`${API_BASE_URL}/admin/audit/queue-history?${query.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchFinancialAuditHistory = async (params = {}, token) => {
+  try {
+    const query = new URLSearchParams();
+    Object.keys(params).forEach((key) => {
+      if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+        query.append(key, params[key]);
+      }
+    });
+
+    const response = await fetch(`${API_BASE_URL}/admin/audit/financial?${query.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const getClinicOperationalPolicy = async (clinicId, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/admin/clinics/${clinicId}/policy`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const updateClinicOperationalPolicy = async (clinicId, policyData, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/admin/clinics/${clinicId}/policy`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(policyData),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
 
 
 

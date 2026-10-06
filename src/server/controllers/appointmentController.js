@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { Appointment, Doctor, DoctorSchedule, Patient, QueueCounter, QueueEntry, QueueHistory, Notification } from '../models/index.js';
+import { Appointment, Clinic, Doctor, DoctorSchedule, Patient, QueueCounter, QueueEntry, QueueHistory, Notification } from '../models/index.js';
 
 /**
  * Helper to format date YYYY-MM-DD in Asia/Kolkata timezone
@@ -683,17 +683,29 @@ export const selfCheckInAppointment = async (req, res, next) => {
     const currentMin = timeToMinutes(currentTimeIST);
     const slotStartMin = timeToMinutes(appointment.timeSlot.startTime);
 
-    if (currentMin < slotStartMin - 60) {
+    // Evaluate dynamic arrival window from clinic operationalPolicy (defaults: 60m lead, 30m grace)
+    let clinic = null;
+    try {
+      if (mongoose.connection.readyState === 1 || Clinic.findById !== mongoose.Model.findById) {
+        clinic = await Clinic.findById(appointment.clinicId);
+      }
+    } catch (e) {
+      clinic = null;
+    }
+    const leadMinutes = clinic?.operationalPolicy?.selfCheckInLeadMinutes ?? 60;
+    const graceMinutes = clinic?.operationalPolicy?.selfCheckInGraceMinutes ?? 30;
+
+    if (currentMin < slotStartMin - leadMinutes) {
       return res.status(400).json({
         success: false,
-        message: 'Self check-in window opens 60 minutes before appointment start time',
+        message: `Self check-in window opens ${leadMinutes} minutes before appointment start time`,
       });
     }
 
-    if (currentMin > slotStartMin + 30) {
+    if (currentMin > slotStartMin + graceMinutes) {
       return res.status(400).json({
         success: false,
-        message: 'Self check-in window closed 30 minutes after appointment start time',
+        message: `Self check-in window closed ${graceMinutes} minutes after appointment start time`,
       });
     }
 
