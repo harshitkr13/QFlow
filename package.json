@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/server/server.js",
+    "build": "npm run build:client",
     "dev:server": "nodemon src/server/server.js",
     "dev:client": "vite --config src/client/vite.config.js src/client",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
@@ -25,7 +26,12 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
+    "mongodb-memory-server": "^11.3.0",
     "nodemon": "^3.1.9",
     "vite": "^6.1.0"
+  },
+  "engines": {
+    "node": "22.x || 24.x",
+    "npm": ">=10.0.0"
   }
 }

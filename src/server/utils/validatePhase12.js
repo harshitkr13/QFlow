@@ -225,7 +225,11 @@ async function runPhase12Validation() {
   }
 }
 
-runPhase12Validation().catch((err) => {
-  console.error('Phase 12 Validation Error:', err.message);
-  process.exit(1);
-});
+runPhase12Validation()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((err) => {
+    console.error('Phase 12 Validation Error:', err.message);
+    process.exit(1);
+  });

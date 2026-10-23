@@ -221,7 +221,7 @@ export const runPhase06Validation = async () => {
       return { status: statusVal, body: bodyVal };
     };
 
-    const targetDate = '2026-09-15'; // Future date
+    const targetDate = getFormattedDateIST(new Date(Date.now() + 86400000 * 2)); // Future date
 
     // ----------------------------------------------------
     // AVAILABILITY TESTS (1-15)

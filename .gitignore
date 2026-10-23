@@ -24,3 +24,11 @@ yarn-error.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Interview & Local Study Artifacts
+QFlow_Interview_Preparation_Guide.pdf
+QFlow_Combined_Technical_Interview_Study_Guide.pdf
+generate_pdf.py
+build_interview_pdf.py
+QFlow_Combined_Technical_Interview_Study_Guide.md
+

@@ -26,7 +26,7 @@ import { runPhase10Validation } from './validatePhase10.js';
 
 dotenv.config();
 
-export const runPhase11Validation = async () => {
+export const runPhase11Validation = async (shouldDisconnect = false) => {
   console.log('\n==================================================');
   console.log('STARTING PHASE 11 COMPREHENSIVE VALIDATION SUITE');
   console.log('==================================================\n');
@@ -351,10 +351,24 @@ export const runPhase11Validation = async () => {
     if (createdSpecialties.length > 0) await Specialty.deleteMany({ _id: { $in: createdSpecialties.map((s) => s._id) } });
 
     console.log('Phase 11 Validation script finished successfully.');
+    if (shouldDisconnect && mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
+    }
   }
 };
 
-runPhase11Validation().catch((err) => {
-  console.error('Phase 11 Validation script failed:', err);
-  process.exit(1);
-});
+if (process.argv[1] && process.argv[1].includes('validatePhase11.js')) {
+  runPhase11Validation(true)
+    .then(() => {
+      process.exit(0);
+    })
+    .catch(async (err) => {
+      console.error('Phase 11 Validation script failed:', err);
+      try {
+        if (mongoose.connection.readyState !== 0) {
+          await mongoose.disconnect();
+        }
+      } catch (e) {}
+      process.exit(1);
+    });
+}

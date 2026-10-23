@@ -37,13 +37,29 @@ const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 // Security Headers Middleware
 app.use(securityHeaders);
 
+// Parse comma-separated or single CLIENT_URL values for flexible cross-origin support
+// Wildcard origins ('*') are strictly prohibited when credentials: true is enabled per CORS security specification
+const allowedOrigins = CLIENT_URL
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter((origin) => origin && origin !== '*');
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow server-to-server requests, health probes, or curl where origin header is absent
+    if (!origin) {
+      return callback(null, true);
+    }
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  },
+  credentials: true,
+};
+
 // Standard Middleware
-app.use(
-  cors({
-    origin: CLIENT_URL,
-    credentials: true,
-  })
-);
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
