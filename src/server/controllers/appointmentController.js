@@ -100,22 +100,41 @@ export const getDoctorAvailability = async (req, res, next) => {
       });
     }
 
-    // Determine Day of Week (in Asia/Kolkata)
-    const targetDateObj = new Date(`${date}T00:00:00+05:30`);
-    const dayNames = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
-    const dayOfWeek = dayNames[targetDateObj.getUTCDay()];
+// Determine Day of Week from the requested calendar date
+const [year, month, day] = date.split('-').map(Number);
+const targetDateObj = new Date(Date.UTC(year, month - 1, day));
 
-    const daySchedule = schedule.weeklyHours.find((h) => h.dayOfWeek === dayOfWeek);
-    if (!daySchedule || !daySchedule.isWorkingDay || !daySchedule.shifts || daySchedule.shifts.length === 0) {
-      return res.status(200).json({
-        success: true,
-        doctorId: doctor._id,
-        date,
-        dayOfWeek,
-        availableSlots: [],
-        message: 'Doctor does not work on this day',
-      });
-    }
+const dayNames = [
+  'SUNDAY',
+  'MONDAY',
+  'TUESDAY',
+  'WEDNESDAY',
+  'THURSDAY',
+  'FRIDAY',
+  'SATURDAY',
+];
+
+const dayOfWeek = dayNames[targetDateObj.getUTCDay()];
+
+const daySchedule = schedule.weeklyHours.find(
+  (h) => h.dayOfWeek === dayOfWeek
+);
+
+if (
+  !daySchedule ||
+  !daySchedule.isWorkingDay ||
+  !daySchedule.shifts ||
+  daySchedule.shifts.length === 0
+) {
+  return res.status(200).json({
+    success: true,
+    doctorId: doctor._id,
+    date,
+    dayOfWeek,
+    availableSlots: [],
+    message: 'Doctor does not work on this day',
+  });
+}
 
     const duration = doctor.averageConsultationDurationMinutes || 15;
     const allGeneratedSlots = [];

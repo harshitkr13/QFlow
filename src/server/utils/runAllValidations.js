@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import mongoose from 'mongoose';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import * as models from '../models/index.js';
+import { parseDatabaseName, isProtectedDatabase } from '../config/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,13 +64,23 @@ const runAllValidations = async () => {
   console.log('====================================================\n');
 
   let replSet = null;
-  let targetMongoUri = process.env.MONGODB_URI;
+  let targetMongoUri = null;
 
-  if (targetMongoUri) {
-    console.log(`[Test Environment] Using external MONGODB_URI: ${maskMongoUri(targetMongoUri)}`);
+  if (process.env.MONGODB_TEST_URI) {
+    const testDbName = parseDatabaseName(process.env.MONGODB_TEST_URI);
+    if (!testDbName) {
+      console.error('[Test Environment] FATAL: MONGODB_TEST_URI does not specify an explicit database name.');
+      process.exit(1);
+    }
+    if (isProtectedDatabase(testDbName)) {
+      console.error(`[Test Environment] FATAL: MONGODB_TEST_URI cannot target protected database '${testDbName}'.`);
+      process.exit(1);
+    }
+    targetMongoUri = process.env.MONGODB_TEST_URI;
+    console.log(`[Test Environment] Using explicit dedicated test database via MONGODB_TEST_URI (Database: ${testDbName}): ${maskMongoUri(targetMongoUri)}`);
   } else {
-    console.log('[Test Environment] No MONGODB_URI provided in process environment.');
-    console.log('[Test Environment] Starting ephemeral in-memory MongoDB replica set...');
+    console.log('[Test Environment] No MONGODB_TEST_URI provided in process environment.');
+    console.log('[Test Environment] Starting ephemeral in-memory MongoDB replica set (WiredTiger)...');
     try {
       replSet = await MongoMemoryReplSet.create({
         replSet: {
@@ -77,9 +88,9 @@ const runAllValidations = async () => {
           storageEngine: 'wiredTiger',
         },
       });
-      const rawUri = replSet.getUri();
+      const rawUri = replSet.getUri('qflow_test');
       targetMongoUri = rawUri.includes('?') ? `${rawUri}&directConnection=true` : `${rawUri}?directConnection=true`;
-      console.log(`[Test Environment] In-memory replica set online: ${targetMongoUri}`);
+      console.log('[Test Environment] In-memory replica set online (Isolated test database: qflow_test)');
     } catch (err) {
       console.error('[Test Environment] Failed to initialize in-memory replica set:', err);
       process.exit(1);
@@ -107,12 +118,14 @@ const runAllValidations = async () => {
   // Ensure deterministic test JWT_SECRET if none was provided
   const testJwtSecret = process.env.JWT_SECRET || 'ci_test_secret_for_qflow_phase_16_continuous_integration';
 
-  // Environment passed to child validation scripts
+  // Environment passed to child validation scripts - strictly isolated from persistent database
   const childEnv = {
     ...process.env,
     MONGODB_URI: targetMongoUri,
-    JWT_SECRET: testJwtSecret,
+    MONGODB_TEST_URI: targetMongoUri,
     NODE_ENV: 'test',
+    IS_TEST_RUNNER: 'true',
+    JWT_SECRET: testJwtSecret,
   };
 
   const results = [];

@@ -113,6 +113,351 @@ const IconStar = () => (
   </svg>
 );
 
+const IconChevronLeft = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="15 18 9 12 15 6" />
+  </svg>
+);
+
+const IconChevronRight = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="9 18 15 12 9 6" />
+  </svg>
+);
+
+const IconPause = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+    <rect x="6" y="4" width="4" height="16" rx="1" />
+    <rect x="14" y="4" width="4" height="16" rx="1" />
+  </svg>
+);
+
+const IconPlay = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+    <polygon points="5 3 19 12 5 21 5 3" />
+  </svg>
+);
+
+// ----------------------------------------------------
+// Verified Clinical Environment Photographic Assets
+// ----------------------------------------------------
+const HERO_SLIDES = [
+  {
+    id: 'consultation',
+    src: '/images/hero/doctor-consultation.jpg',
+    alt: 'Healthcare provider consulting attentively with a patient in a modern clinical room',
+    caption: 'Modern clinical consultations & personalized care',
+  },
+  {
+    id: 'clinical-space',
+    src: '/images/hero/modern-clinical-space.jpg',
+    alt: 'Bright, modern healthcare facility with clean consultation rooms',
+    caption: 'Advanced outpatient care facilities & synchronized pacing',
+  },
+  {
+    id: 'reception',
+    src: '/images/hero/reception-care.jpg',
+    alt: 'Welcoming clinic reception and organized patient check-in environment',
+    caption: 'Frictionless patient arrival & organized queue check-in',
+  },
+  {
+    id: 'telemetry',
+    src: '/images/hero/clinical-telemetry.jpg',
+    alt: 'Clinician reviewing patient records and digital schedule telemetry',
+    caption: 'Real-time practitioner telemetry & intelligent queue orchestration',
+  },
+];
+
+function HeroCarousel() {
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const [failedImages, setFailedImages] = useState({});
+
+  const [reducedMotion, setReducedMotion] = useState(() => {
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onChange = (e) => setReducedMotion(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  // Calm automatic rotation every 7 seconds
+  useEffect(() => {
+    if (isPaused || isHovered || reducedMotion) return;
+    const timer = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % HERO_SLIDES.length);
+    }, 7000);
+    return () => clearInterval(timer);
+  }, [isPaused, isHovered, reducedMotion]);
+
+  const handlePrev = useCallback(() => {
+    setCurrentSlide((prev) => (prev === 0 ? HERO_SLIDES.length - 1 : prev - 1));
+  }, []);
+
+  const handleNext = useCallback(() => {
+    setCurrentSlide((prev) => (prev + 1) % HERO_SLIDES.length);
+  }, []);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      handlePrev();
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      handleNext();
+    } else if (e.key === ' ' || e.key === 'Enter') {
+      if (e.target === e.currentTarget) {
+        e.preventDefault();
+        setIsPaused((p) => !p);
+      }
+    }
+  };
+
+  const handleImageError = (index) => {
+    setFailedImages((prev) => ({ ...prev, [index]: true }));
+  };
+
+  return (
+    <div
+      className="hero-carousel-frame"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+      role="region"
+      aria-roledescription="carousel"
+      aria-label="Contemporary healthcare clinical environments"
+    >
+      <div className="hero-carousel-viewport">
+        {HERO_SLIDES.map((slide, idx) => {
+          const isActive = idx === currentSlide;
+          const isFailed = failedImages[idx];
+
+          return (
+            <div
+              key={slide.id}
+              className={`hero-slide ${isActive ? 'active' : ''}`}
+              aria-hidden={!isActive}
+            >
+              {isFailed ? (
+                <div className="hero-slide-fallback">
+                  <IconPulse />
+                  <span>{slide.caption}</span>
+                </div>
+              ) : (
+                <img
+                  src={slide.src}
+                  alt={slide.alt}
+                  loading={idx === 0 ? 'eager' : 'lazy'}
+                  onError={() => handleImageError(idx)}
+                  className="hero-slide-img"
+                />
+              )}
+            </div>
+          );
+        })}
+
+        <div className="hero-carousel-overlay" />
+
+        <div className="hero-carousel-caption" aria-live="polite">
+          <span className="caption-dot" />
+          <span className="caption-text">{HERO_SLIDES[currentSlide].caption}</span>
+        </div>
+
+        <div className="hero-carousel-controls">
+          <div className="carousel-nav-buttons">
+            <button
+              type="button"
+              className="carousel-control-btn"
+              onClick={handlePrev}
+              aria-label="Previous photograph"
+              title="Previous photograph"
+            >
+              <IconChevronLeft />
+            </button>
+            <button
+              type="button"
+              className="carousel-control-btn"
+              onClick={() => setIsPaused((p) => !p)}
+              aria-label={isPaused ? 'Resume rotation' : 'Pause rotation'}
+              title={isPaused ? 'Resume rotation' : 'Pause rotation'}
+              aria-pressed={isPaused}
+            >
+              {isPaused ? <IconPlay /> : <IconPause />}
+            </button>
+            <button
+              type="button"
+              className="carousel-control-btn"
+              onClick={handleNext}
+              aria-label="Next photograph"
+              title="Next photograph"
+            >
+              <IconChevronRight />
+            </button>
+          </div>
+
+          <div className="carousel-dots-group" role="tablist" aria-label="Slide indicators">
+            {HERO_SLIDES.map((slide, idx) => (
+              <button
+                key={slide.id}
+                type="button"
+                role="tab"
+                className={`carousel-dot ${idx === currentSlide ? 'active' : ''}`}
+                aria-selected={idx === currentSlide}
+                aria-label={`Slide ${idx + 1} of ${HERO_SLIDES.length}: ${slide.caption}`}
+                onClick={() => setCurrentSlide(idx)}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------
+// Premium Doctor Discovery Card Components (Phase 16 Fix 6)
+// ----------------------------------------------------
+function DoctorAvatar({ fullName, photoUrl }) {
+  const [imgError, setImgError] = useState(false);
+  const initials = fullName
+    ? fullName
+        .replace(/^Dr\.?\s*/i, '')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((n) => n[0])
+        .slice(0, 2)
+        .join('')
+        .toUpperCase() || 'DR'
+    : 'DR';
+
+  return (
+    <div className="doctor-avatar-wrapper">
+      {photoUrl && !imgError ? (
+        <img
+          src={photoUrl}
+          alt={fullName ? `Photo of ${fullName}` : 'Specialist profile'}
+          className="doctor-avatar-img"
+          onError={() => setImgError(true)}
+          loading="lazy"
+        />
+      ) : (
+        <div className="doctor-avatar-initials" aria-label={fullName || 'Doctor initials'}>
+          {initials}
+        </div>
+      )}
+      <span className="doctor-avail-indicator" title="Accepting Appointments" aria-hidden="true" />
+    </div>
+  );
+}
+
+function DoctorDiscoveryCard({ doctor, onOpenProfile, onBookAppointment }) {
+  const d = doctor;
+  const ratingVal = d.averageRating && d.averageRating > 0 ? d.averageRating.toFixed(1) : '5.0';
+  const reviewsCount = d.totalReviews || 0;
+  const reviewsLabel = reviewsCount > 0 ? `(${reviewsCount} reviews)` : '(New)';
+  const expLabel = d.experienceYears ? `${d.experienceYears} yrs` : '5+ yrs';
+  const feeLabel = `₹${d.consultationFee ?? 500}`;
+  const durationLabel = d.averageConsultationDurationMinutes ? `~${d.averageConsultationDurationMinutes} mins` : '~15 mins';
+
+  const clinicName = d.clinic?.name || 'Main Medical Center';
+  const locationSubtext = d.distanceKm != null
+    ? `${d.distanceKm} km away`
+    : d.clinic?.city
+      ? d.clinic.city
+      : null;
+
+  return (
+    <article className="doctor-card" aria-label={`Doctor profile for ${d.fullName}`}>
+      <div className="doc-card-content">
+        <header className="doc-card-top">
+          <DoctorAvatar fullName={d.fullName} photoUrl={d.photoUrl} />
+          <div className="doc-identity-block">
+            <h3 className="doc-name" title={d.fullName}>
+              {d.fullName}
+            </h3>
+            <div className="doc-specialty-line">
+              {d.specialty?.name || 'General Medicine'}
+            </div>
+            <div className="doc-clinic-meta" title={clinicName + (locationSubtext ? ` · ${locationSubtext}` : '')}>
+              <IconLocation />
+              <span className="doc-clinic-text">
+                {clinicName}
+                {locationSubtext && (
+                  <span className="doc-clinic-location"> · {locationSubtext}</span>
+                )}
+              </span>
+            </div>
+          </div>
+        </header>
+
+        <div className="doc-attributes-grid" aria-label="Clinical background and consultation fees">
+          <div className="doc-attribute-col">
+            <span className="doc-attribute-label">Rating</span>
+            <div className="doc-attribute-val rating-val">
+              <IconStar />
+              <span className="rating-score">{ratingVal}</span>
+              <span className="rating-count">
+                {reviewsCount > 0 ? (
+                  <>({reviewsCount}<span className="reviews-word"> reviews</span>)</>
+                ) : (
+                  '(New)'
+                )}
+              </span>
+            </div>
+          </div>
+          <div className="doc-attribute-col">
+            <span className="doc-attribute-label">Experience</span>
+            <div className="doc-attribute-val">
+              {expLabel}
+            </div>
+          </div>
+          <div className="doc-attribute-col">
+            <span className="doc-attribute-label">Consultation</span>
+            <div className="doc-attribute-val fee-val">
+              {feeLabel}
+              <span className="fee-unit">/ visit</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="doc-session-note">
+          <IconClock />
+          <span>Typical session: {durationLabel}</span>
+        </div>
+      </div>
+
+      <footer className="doctor-actions-row">
+        <button
+          type="button"
+          className="btn btn-secondary doc-btn-profile"
+          onClick={() => onOpenProfile(d._id)}
+          aria-label={`View full profile for ${d.fullName}`}
+        >
+          View Profile
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary doc-btn-book"
+          onClick={() => onBookAppointment(d)}
+          aria-label={`Book consultation appointment with ${d.fullName}`}
+        >
+          Book Consultation
+        </button>
+      </footer>
+    </article>
+  );
+}
+
 export default function App() {
   // ----------------------------------------------------
   // Persistent Authentication & Role Session State (Phase 13)
@@ -1397,35 +1742,69 @@ export default function App() {
       {viewTab === 'discover' && (
         <div className="discovery-layout">
           {/* Healthcare SaaS Hero Section */}
-          <section className="hero-section">
-            <div className="hero-pill">
-              <IconPulse />
-              <span>Intelligent Healthcare Queue OS</span>
-            </div>
-            <h1 className="hero-title">
-              Precision Care, <span className="hero-title-gradient">Zero Wait-Room Friction.</span>
-            </h1>
-            <p className="hero-subtitle">
-              Discover verified medical specialists, monitor live consultation pacing in real time, and check in effortlessly from anywhere.
-            </p>
-            <div className="hero-trust-bar">
-              <div className="trust-item">
-                <IconShield />
-                <span>Verified Specialists</span>
+          <section className="hero-section" aria-label="Healthcare platform introduction">
+            <div className="hero-container">
+              {/* Left Column: Editorial Headline, Supporting Copy, Actions & Trust Bar */}
+              <div className="hero-content">
+                <div className="hero-pill">
+                  <IconPulse />
+                  <span>Intelligent healthcare queue platform</span>
+                </div>
+                <h1 className="hero-title">
+                  Precision Care, <span className="hero-title-gradient">Zero Wait-Room Friction.</span>
+                </h1>
+                <p className="hero-subtitle">
+                  Discover verified medical specialists, monitor live consultation pacing in real time, and check in effortlessly from anywhere.
+                </p>
+                <div className="hero-cta-group">
+                  <button
+                    className="btn btn-primary hero-btn-primary"
+                    onClick={() => {
+                      const el = document.getElementById('discovery-controls');
+                      if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        const input = el.querySelector('input');
+                        if (input) input.focus();
+                      }
+                    }}
+                  >
+                    <IconSearch />
+                    <span>Find Specialists</span>
+                  </button>
+                  <button
+                    className="btn btn-secondary hero-btn-secondary"
+                    onClick={handleGetLocation}
+                    title={locStatus}
+                  >
+                    <IconLocation />
+                    <span>{locLoading ? 'Locating...' : coords ? 'Location Active' : 'Explore Nearby'}</span>
+                  </button>
+                </div>
+                <div className="hero-trust-bar">
+                  <div className="trust-item">
+                    <IconShield />
+                    <span>Verified Specialists</span>
+                  </div>
+                  <div className="trust-item">
+                    <IconActivity />
+                    <span>Live Telemetry & AI Pacing</span>
+                  </div>
+                  <div className="trust-item">
+                    <IconClock />
+                    <span>Synchronized Clinic Queues</span>
+                  </div>
+                </div>
               </div>
-              <div className="trust-item">
-                <IconActivity />
-                <span>Live Telemetry & AI Pacing</span>
-              </div>
-              <div className="trust-item">
-                <IconClock />
-                <span>Synchronized Clinic Queues</span>
+
+              {/* Right Column: Premium Healthcare Photographic Carousel */}
+              <div className="hero-visual">
+                <HeroCarousel />
               </div>
             </div>
           </section>
 
           {/* Discovery Command Surface */}
-          <div className="discovery-controls-card">
+          <div className="discovery-controls-card" id="discovery-controls">
             {/* Contextual Geolocation Bar */}
             <div className="location-row">
               <div className="location-meta">
@@ -1537,18 +1916,33 @@ export default function App() {
           {loading ? (
             <div className="doctors-grid">
               {[1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="skeleton-card">
-                  <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.25rem' }}>
-                    <div className="skeleton-shimmer" style={{ width: 56, height: 56, borderRadius: 'var(--radius-lg)' }} />
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      <div className="skeleton-shimmer" style={{ height: 18, width: '70%' }} />
-                      <div className="skeleton-shimmer" style={{ height: 14, width: '45%' }} />
+                <div key={i} className="skeleton-card" aria-hidden="true">
+                  <div className="doc-card-top">
+                    <div className="skeleton-shimmer" style={{ width: 60, height: 60, borderRadius: '12px', flexShrink: 0 }} />
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.45rem', minWidth: 0 }}>
+                      <div className="skeleton-shimmer" style={{ height: 22, width: '65%', borderRadius: '4px' }} />
+                      <div className="skeleton-shimmer" style={{ height: 15, width: '42%', borderRadius: '4px' }} />
+                      <div className="skeleton-shimmer" style={{ height: 14, width: '75%', borderRadius: '4px' }} />
                     </div>
                   </div>
-                  <div className="skeleton-shimmer" style={{ height: 60, marginBottom: '1.25rem' }} />
-                  <div style={{ display: 'flex', gap: '0.75rem' }}>
-                    <div className="skeleton-shimmer" style={{ height: 38, flex: 1 }} />
-                    <div className="skeleton-shimmer" style={{ height: 38, flex: 1 }} />
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', padding: '1rem 0', borderTop: '1px solid rgba(255,255,255,0.06)', borderBottom: '1px solid rgba(255,255,255,0.06)', margin: '1.25rem 0 0.85rem 0' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                      <div className="skeleton-shimmer" style={{ height: 11, width: '50%' }} />
+                      <div className="skeleton-shimmer" style={{ height: 16, width: '70%' }} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                      <div className="skeleton-shimmer" style={{ height: 11, width: '50%' }} />
+                      <div className="skeleton-shimmer" style={{ height: 16, width: '70%' }} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                      <div className="skeleton-shimmer" style={{ height: 11, width: '50%' }} />
+                      <div className="skeleton-shimmer" style={{ height: 16, width: '70%' }} />
+                    </div>
+                  </div>
+                  <div className="skeleton-shimmer" style={{ height: 13, width: '50%', marginBottom: '1.25rem' }} />
+                  <div style={{ display: 'flex', gap: '0.75rem', marginTop: 'auto' }}>
+                    <div className="skeleton-shimmer" style={{ height: 42, flex: 1, borderRadius: 'var(--radius-md)' }} />
+                    <div className="skeleton-shimmer" style={{ height: 42, flex: 1.5, borderRadius: 'var(--radius-md)' }} />
                   </div>
                 </div>
               ))}
@@ -1587,81 +1981,14 @@ export default function App() {
             </div>
           ) : (
             <div className="doctors-grid">
-              {doctors.map((d) => {
-                const initials = d.fullName
-                  ? d.fullName.replace(/^Dr\.?\s*/i, '').split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()
-                  : 'DR';
-                return (
-                  <div key={d._id} className="doctor-card">
-                    <div>
-                      <div className="doctor-card-top">
-                        <div className="doctor-avatar-wrapper">
-                          <div className="doctor-avatar-img">
-                            {initials}
-                          </div>
-                          <span className="doctor-avail-indicator" title="Accepting Appointments" />
-                        </div>
-                        <div className="doctor-info-primary">
-                          <div className="doc-name">{d.fullName}</div>
-                          <span className="doc-specialty-badge">
-                            {d.specialty?.name || 'General Practice'}
-                          </span>
-                          <div className="doc-clinic-name">
-                            <IconLocation />
-                            <span>{d.clinic?.name || 'Main Clinic Center'}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Doctor Metrics Grid */}
-                      <div className="doctor-metrics-grid">
-                        <div className="metric-pill">
-                          <span className="metric-pill-label">Rating</span>
-                          <span className="metric-pill-value">
-                            <span className="rating-star-icon">★</span>
-                            {d.averageRating ? d.averageRating.toFixed(1) : '5.0'}
-                          </span>
-                        </div>
-                        <div className="metric-pill">
-                          <span className="metric-pill-label">Experience</span>
-                          <span className="metric-pill-value">
-                            {d.experienceYears ? `${d.experienceYears} yrs` : '5+ yrs'}
-                          </span>
-                        </div>
-                        <div className="metric-pill">
-                          <span className="metric-pill-label">Consultation</span>
-                          <span className="metric-pill-value" style={{ color: 'var(--primary-light)' }}>
-                            ₹{d.consultationFee ?? 500}
-                          </span>
-                        </div>
-                        <div className="metric-pill">
-                          <span className="metric-pill-label">Queue Pacing</span>
-                          <span className="metric-pill-value" style={{ color: 'var(--status-success)', fontSize: '0.8rem' }}>
-                            <IconPulse /> Active
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="doctor-actions-row">
-                      <button
-                        className="btn btn-secondary"
-                        style={{ flex: 1 }}
-                        onClick={() => handleOpenProfile(d._id)}
-                      >
-                        Profile
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        style={{ flex: 1.3 }}
-                        onClick={() => handleProceedToAppointment(d)}
-                      >
-                        Book Slot
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+              {doctors.map((d) => (
+                <DoctorDiscoveryCard
+                  key={d._id}
+                  doctor={d}
+                  onOpenProfile={handleOpenProfile}
+                  onBookAppointment={handleProceedToAppointment}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -1711,7 +2038,7 @@ export default function App() {
                           >
                             ✓ Check In Now (Get Token)
                           </button>
-                          <button className="btn btn-secondary" style={{ color: '#ef4444', fontSize: '0.85rem' }} onClick={() => handleCancelAppointment(appt._id)}>
+                          <button className="btn btn-danger" style={{ fontSize: '0.85rem' }} onClick={() => handleCancelAppointment(appt._id)}>
                             Cancel
                           </button>
                         </>
@@ -2255,9 +2582,9 @@ export default function App() {
         <div className="card" style={{ padding: '2rem', maxWidth: '1000px', margin: '0 auto' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '2rem', borderBottom: '1px solid var(--border-default)', paddingBottom: '1.25rem' }}>
             <div>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.75rem', borderRadius: 'var(--radius-full)', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.25)', color: 'var(--status-success)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.3rem 0.75rem', borderRadius: 'var(--radius-full)', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.25)', color: 'var(--status-success)', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.5rem' }}>
                 <span className="status-dot-pulse" />
-                <span>Live Broadcast Kiosk</span>
+                <span>Live broadcast kiosk</span>
               </div>
               <h2 style={{ fontSize: '1.6rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
                 Waiting Room Public Display
@@ -2985,12 +3312,12 @@ export default function App() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))', gap: '0.5rem' }}>
                   {availability.availableSlots.map((slot) => (
                     <button
-                      key={slot}
+                      key={`${slot.startTime}-${slot.endTime}`}
                       className={`btn ${selectedSlot === slot ? 'btn-primary' : 'btn-secondary'}`}
                       style={{ fontSize: '0.8rem', padding: '0.45rem 0.6rem' }}
                       onClick={() => setSelectedSlot(slot)}
                     >
-                      {slot}
+                      {slot.startTime} - {slot.endTime}
                     </button>
                   ))}
                 </div>
@@ -3007,9 +3334,18 @@ export default function App() {
               </div>
             )}
 
-            <button className="btn btn-primary" style={{ width: '100%', padding: '0.75rem' }} disabled={!selectedSlot} onClick={handleConfirmBooking}>
-              Confirm Booking ({selectedSlot || 'Select a slot'})
-            </button>
+<button
+  className="btn btn-primary"
+  style={{ width: '100%', padding: '0.75rem' }}
+  disabled={!selectedSlot}
+  onClick={handleConfirmBooking}
+>
+  Confirm Booking (
+  {selectedSlot
+    ? `${selectedSlot.startTime} - ${selectedSlot.endTime}`
+    : 'Select a slot'}
+  )
+</button>
           </div>
         </div>
       )}

@@ -76,6 +76,7 @@ const createMockCtx = (user = null, params = {}, body = {}, query = {}) => {
 export const runPhase08Tests = async () => {
   console.log('--- Phase 08 Core Queue Engine Validation Starting ---');
   let testClinic, testSpecialty, testDoctor, testDoctorUser, testStaff, testStaffUser, testAdminUser, testPatientUser;
+  let otherClinic, otherStaffUser;
   let createdUserIds = [];
   let createdPatientIds = [];
 
@@ -542,8 +543,8 @@ export const runPhase08Tests = async () => {
     console.log('✓ Security Test Passed: Patient role rejected with 403 Forbidden.');
 
     // Cross-Clinic Staff rejection
-    const otherClinic = await Clinic.create({ name: 'Other Clinic', code: `OTH-${Date.now()}`, address: { street: '123 St', city: 'Delhi', state: 'Delhi', pincode: '110001' }, location: { type: 'Point', coordinates: [77.2, 28.6] }, phone: '9999999999', email: `oth_${Date.now()}@test.com`, adminId: testAdminUser._id, isActive: true });
-    const otherStaffUser = await User.create({ fullName: 'Other Staff', email: `othstaff_${Date.now()}@test.com`, password: 'Password123!', role: 'STAFF', isActive: true });
+    otherClinic = await Clinic.create({ name: 'Other Clinic', code: `OTH-${Date.now()}`, address: { street: '123 St', city: 'Delhi', state: 'Delhi', pincode: '110001' }, location: { type: 'Point', coordinates: [77.2, 28.6] }, phone: '9999999999', email: `oth_${Date.now()}@test.com`, adminId: testAdminUser._id, isActive: true });
+    otherStaffUser = await User.create({ fullName: 'Other Staff', email: `othstaff_${Date.now()}@test.com`, password: 'Password123!', role: 'STAFF', isActive: true });
     createdUserIds.push(otherStaffUser._id);
     await Staff.create({ userId: otherStaffUser._id, clinicId: otherClinic._id, fullName: 'Other Staff', phone: '9999999998' });
     
@@ -572,16 +573,6 @@ export const runPhase08Tests = async () => {
     if (historyLogs.length === 0) throw new Error('QueueHistory audit records missing');
     console.log(`✓ Audit Log Test Passed: ${historyLogs.length} immutable QueueHistory records logged.`);
 
-    // Clean test records
-    await resetDoctorQueue();
-    await Clinic.deleteMany({ _id: { $in: [testClinic._id, otherClinic._id] } });
-    await Specialty.deleteMany({ _id: testSpecialty._id });
-    await User.deleteMany({ _id: { $in: createdUserIds } });
-    await Doctor.deleteMany({ userId: testDoctorUser._id });
-    await Staff.deleteMany({ userId: { $in: [testStaffUser._id, otherStaffUser._id] } });
-    await Patient.deleteMany({ _id: { $in: createdPatientIds } });
-    console.log('✓ All Phase 08 temporary test records removed cleanly from MongoDB Atlas.');
-
     console.log('--- Running Prior Phase Regression Suites (Phase 03, 04, 05, 06, 07) ---');
     await runAuthValidation();
     await runPhase04Validation();
@@ -594,6 +585,19 @@ export const runPhase08Tests = async () => {
   } catch (error) {
     console.error('❌ Phase 08 Validation Suite Encountered Error:', error);
     throw error;
+  } finally {
+    if (mongoose.connection.readyState === 1) {
+      if (typeof resetDoctorQueue === 'function') await resetDoctorQueue().catch(() => {});
+      const clinicIds = [testClinic?._id, otherClinic?._id].filter(Boolean);
+      if (clinicIds.length) await Clinic.deleteMany({ _id: { $in: clinicIds } }).catch(() => {});
+      if (testSpecialty?._id) await Specialty.deleteMany({ _id: testSpecialty._id }).catch(() => {});
+      if (createdUserIds.length) await User.deleteMany({ _id: { $in: createdUserIds } }).catch(() => {});
+      if (testDoctorUser?._id) await Doctor.deleteMany({ userId: testDoctorUser._id }).catch(() => {});
+      const staffUserIds = [testStaffUser?._id, otherStaffUser?._id].filter(Boolean);
+      if (staffUserIds.length) await Staff.deleteMany({ userId: { $in: staffUserIds } }).catch(() => {});
+      if (createdPatientIds.length) await Patient.deleteMany({ _id: { $in: createdPatientIds } }).catch(() => {});
+      console.log('✓ Phase 08 temporary test fixtures cleaned up safely.');
+    }
   }
 };
 
