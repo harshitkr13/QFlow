@@ -32,3 +32,16 @@ generate_pdf.py
 build_interview_pdf.py
 QFlow_Combined_Technical_Interview_Study_Guide.md
 
+# Local UI/Design Artifacts
+artifacts/
+
+# Local-Only Diagnostic & Maintenance Scripts
+checkAdmin.mjs
+inspectSchedules.mjs
+src/server/scripts/auditDoctorAvailability.js
+src/server/scripts/cleanupAllowlist.json
+src/server/scripts/cleanupDevFixtures.js
+src/server/scripts/cleanupDevFixtures.test.js
+src/server/scripts/createAdminAccount.mjs
+
+

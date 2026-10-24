@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { getTodayDateIST, formatWorkingDays } from './utils/dateUtils.js';
 import {
   fetchSpecialties,
   discoverDoctors,
@@ -43,6 +44,8 @@ import {
   registerUser,
   updateDoctorSelfStatus,
   fetchDoctorOwnAppointments,
+  fetchDoctorOwnSchedule,
+  updateDoctorScheduleSelf,
   selfCheckInAppointment,
   triageQueueEntry,
   transferQueueDoctor,
@@ -55,6 +58,11 @@ import {
   fetchFinancialAuditHistory,
   getClinicOperationalPolicy,
   updateClinicOperationalPolicy,
+  fetchAdminDoctors,
+  updateDoctorScheduleAdmin,
+  fetchStaffAppointments,
+  fetchAdminClinics,
+  fetchAdminStaff,
 } from './services/api';
 import './App.css';
 
@@ -85,6 +93,15 @@ const IconClock = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="10" />
     <polyline points="12 6 12 12 16 14" />
+  </svg>
+);
+
+const IconCalendar = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
   </svg>
 );
 
@@ -430,6 +447,17 @@ function DoctorDiscoveryCard({ doctor, onOpenProfile, onBookAppointment }) {
           </div>
         </div>
 
+        <div className="doc-schedule-note" title={d.hasSchedule && d.workingDays?.length > 0 ? `Available on ${formatWorkingDays(d.workingDays)}` : 'Schedule not configured yet'}>
+          <IconCalendar />
+          {d.hasSchedule && d.workingDays?.length > 0 ? (
+            <span>
+              <strong className="doc-schedule-configured">Available:</strong> {formatWorkingDays(d.workingDays)}
+            </span>
+          ) : (
+            <span className="doc-schedule-unconfigured">Schedule not configured</span>
+          )}
+        </div>
+
         <div className="doc-session-note">
           <IconClock />
           <span>Typical session: {durationLabel}</span>
@@ -457,6 +485,24 @@ function DoctorDiscoveryCard({ doctor, onOpenProfile, onBookAppointment }) {
     </article>
   );
 }
+
+const DAYS_OF_WEEK = [
+  'MONDAY',
+  'TUESDAY',
+  'WEDNESDAY',
+  'THURSDAY',
+  'FRIDAY',
+  'SATURDAY',
+  'SUNDAY',
+];
+
+const createEmptyWeeklyHours = () =>
+  DAYS_OF_WEEK.map((day) => ({
+    dayOfWeek: day,
+    isWorkingDay: false,
+    shifts: [],
+    breaks: [],
+  }));
 
 export default function App() {
   // ----------------------------------------------------
@@ -572,6 +618,326 @@ export default function App() {
   const [doctorOpLoading, setDoctorOpLoading] = useState(false);
   const [doctorMessage, setDoctorMessage] = useState(null);
 
+  // Doctor Cockpit Sub-Tab Navigation ('queue' | 'appointments' | 'schedule')
+  const [doctorSubTab, setDoctorSubTab] = useState('queue');
+
+  // Doctor Appointments State
+  const [doctorAppointments, setDoctorAppointments] = useState([]);
+  const [doctorApptLoading, setDoctorApptLoading] = useState(false);
+  const [doctorApptError, setDoctorApptError] = useState(null);
+  const [doctorApptScope, setDoctorApptScope] = useState('today'); // 'today' | 'upcoming' | 'past'
+  const [doctorApptSearch, setDoctorApptSearch] = useState('');
+  const [doctorApptDate, setDoctorApptDate] = useState('');
+  const [doctorCancelModal, setDoctorCancelModal] = useState({
+    isOpen: false,
+    appointment: null,
+    reason: '',
+    loading: false,
+    error: null,
+  });
+
+  // Doctor Schedule Self-Service State
+  const [doctorScheduleWeeklyHours, setDoctorScheduleWeeklyHours] = useState(() =>
+    ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'].map((day) => ({
+      dayOfWeek: day,
+      isWorkingDay: false,
+      shifts: [],
+      breaks: [],
+    }))
+  );
+  const [doctorScheduleDuration, setDoctorScheduleDuration] = useState(15);
+  const [doctorScheduleLoading, setDoctorScheduleLoading] = useState(false);
+  const [doctorScheduleSaving, setDoctorScheduleSaving] = useState(false);
+  const [doctorScheduleMessage, setDoctorScheduleMessage] = useState(null);
+  const [doctorProfileData, setDoctorProfileData] = useState(null);
+
+  const getAgeFromDob = (dobString) => {
+    if (!dobString) return null;
+    const dob = new Date(dobString);
+    if (isNaN(dob.getTime())) return null;
+    const diffMs = Date.now() - dob.getTime();
+    const ageDt = new Date(diffMs);
+    return Math.abs(ageDt.getUTCFullYear() - 1970);
+  };
+
+  const loadDoctorAppointments = useCallback(async (scopeOverride, dateOverride) => {
+    if (!doctorToken) return;
+    setDoctorApptLoading(true);
+    setDoctorApptError(null);
+    const scopeToUse = scopeOverride !== undefined ? scopeOverride : doctorApptScope;
+    const dateToUse = dateOverride !== undefined ? dateOverride : doctorApptDate;
+
+    const params = {};
+    if (dateToUse) {
+      params.date = dateToUse;
+    } else if (scopeToUse) {
+      params.scope = scopeToUse;
+    }
+
+    const res = await fetchDoctorOwnAppointments(doctorToken, params);
+    if (res.ok && res.data?.appointments) {
+      setDoctorAppointments(res.data.appointments);
+    } else {
+      setDoctorApptError(res.data?.message || res.error || 'Failed to load appointments');
+    }
+    setDoctorApptLoading(false);
+  }, [doctorToken, doctorApptScope, doctorApptDate]);
+
+  const loadDoctorSelfSchedule = useCallback(async () => {
+    if (!doctorToken) return;
+    setDoctorScheduleLoading(true);
+    setDoctorScheduleMessage(null);
+    const res = await fetchDoctorOwnSchedule(doctorToken);
+    if (res.ok && res.data) {
+      if (res.data.doctor) {
+        setDoctorProfileData(res.data.doctor);
+        if (res.data.doctor.averageConsultationDurationMinutes) {
+          setDoctorScheduleDuration(res.data.doctor.averageConsultationDurationMinutes);
+        }
+      }
+      const existingWeekly = res.data.schedule?.weeklyHours || [];
+      const hoursMap = new Map();
+      existingWeekly.forEach((d) => hoursMap.set(d.dayOfWeek, d));
+
+      const merged = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'].map((dayName) => {
+        const existing = hoursMap.get(dayName);
+        if (existing) {
+          return {
+            dayOfWeek: dayName,
+            isWorkingDay: Boolean(existing.isWorkingDay),
+            shifts: Array.isArray(existing.shifts)
+              ? existing.shifts.map((s) => ({
+                  startTime: s.startTime || '09:00',
+                  endTime: s.endTime || '13:00',
+                }))
+              : [],
+            breaks: Array.isArray(existing.breaks)
+              ? existing.breaks.map((b) => ({
+                  startTime: b.startTime || '13:00',
+                  endTime: b.endTime || '14:00',
+                  label: b.label || 'Break',
+                }))
+              : [],
+          };
+        }
+        return {
+          dayOfWeek: dayName,
+          isWorkingDay: false,
+          shifts: [],
+          breaks: [],
+        };
+      });
+      setDoctorScheduleWeeklyHours(merged);
+    } else {
+      setDoctorScheduleMessage(`⚠️ ${res.data?.message || res.error || 'Failed to load schedule'}`);
+    }
+    setDoctorScheduleLoading(false);
+  }, [doctorToken]);
+
+  const handleDoctorScheduleSave = async () => {
+    if (!doctorToken) return;
+    setDoctorScheduleSaving(true);
+    setDoctorScheduleMessage(null);
+
+    const dur = parseInt(doctorScheduleDuration, 10);
+    if (isNaN(dur) || dur < 1 || dur > 240) {
+      setDoctorScheduleMessage('⚠️ Consultation duration must be an integer between 1 and 240 minutes');
+      setDoctorScheduleSaving(false);
+      return;
+    }
+
+    const payload = {
+      weeklyHours: doctorScheduleWeeklyHours,
+      averageConsultationDurationMinutes: dur,
+    };
+
+    const res = await updateDoctorScheduleSelf(payload, doctorToken);
+    if (res.ok) {
+      setDoctorScheduleMessage('✅ Schedule and consultation duration updated successfully!');
+      if (res.data?.doctor?.averageConsultationDurationMinutes) {
+        setDoctorScheduleDuration(res.data.doctor.averageConsultationDurationMinutes);
+      }
+    } else {
+      setDoctorScheduleMessage(`⚠️ Error: ${res.data?.message || res.error || 'Failed to update schedule'}`);
+    }
+    setDoctorScheduleSaving(false);
+  };
+
+  const handleDoctorToggleWorkingDay = (dayIndex) => {
+    setDoctorScheduleWeeklyHours((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[dayIndex] };
+      const nextVal = !target.isWorkingDay;
+      target.isWorkingDay = nextVal;
+      if (nextVal && (!target.shifts || target.shifts.length === 0)) {
+        target.shifts = [{ startTime: '09:00', endTime: '13:00' }];
+      }
+      if (!nextVal) {
+        target.shifts = [];
+        target.breaks = [];
+      }
+      copy[dayIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleDoctorAddShift = (dayIndex) => {
+    setDoctorScheduleWeeklyHours((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[dayIndex] };
+      const currentShifts = Array.isArray(target.shifts) ? [...target.shifts] : [];
+      let nextStart = '14:00';
+      let nextEnd = '18:00';
+      if (currentShifts.length > 0) {
+        const lastShift = currentShifts[currentShifts.length - 1];
+        if (lastShift.endTime < '17:00') {
+          nextStart = '17:00';
+          nextEnd = '20:00';
+        } else {
+          nextStart = '18:00';
+          nextEnd = '21:00';
+        }
+      }
+      currentShifts.push({ startTime: nextStart, endTime: nextEnd });
+      target.shifts = currentShifts;
+      copy[dayIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleDoctorRemoveShift = (dayIndex, shiftIndex) => {
+    setDoctorScheduleWeeklyHours((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[dayIndex] };
+      target.shifts = (target.shifts || []).filter((_, idx) => idx !== shiftIndex);
+      copy[dayIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleDoctorShiftChange = (dayIndex, shiftIndex, field, value) => {
+    setDoctorScheduleWeeklyHours((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[dayIndex] };
+      const shifts = [...(target.shifts || [])];
+      shifts[shiftIndex] = { ...shifts[shiftIndex], [field]: value };
+      target.shifts = shifts;
+      copy[dayIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleDoctorAddBreak = (dayIndex) => {
+    setDoctorScheduleWeeklyHours((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[dayIndex] };
+      const currentBreaks = Array.isArray(target.breaks) ? [...target.breaks] : [];
+      currentBreaks.push({ startTime: '13:00', endTime: '14:00', label: 'Lunch' });
+      target.breaks = currentBreaks;
+      copy[dayIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleDoctorRemoveBreak = (dayIndex, breakIndex) => {
+    setDoctorScheduleWeeklyHours((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[dayIndex] };
+      target.breaks = (target.breaks || []).filter((_, idx) => idx !== breakIndex);
+      copy[dayIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleDoctorBreakChange = (dayIndex, breakIndex, field, value) => {
+    setDoctorScheduleWeeklyHours((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[dayIndex] };
+      const breaks = [...(target.breaks || [])];
+      breaks[breakIndex] = { ...breaks[breakIndex], [field]: value };
+      target.breaks = breaks;
+      copy[dayIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleDoctorApplyMonToFriPreset = () => {
+    setDoctorScheduleWeeklyHours((prev) =>
+      prev.map((day) => {
+        if (['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'].includes(day.dayOfWeek)) {
+          return {
+            dayOfWeek: day.dayOfWeek,
+            isWorkingDay: true,
+            shifts: [
+              { startTime: '09:00', endTime: '13:00' },
+              { startTime: '16:00', endTime: '20:00' },
+            ],
+            breaks: [],
+          };
+        }
+        return {
+          dayOfWeek: day.dayOfWeek,
+          isWorkingDay: false,
+          shifts: [],
+          breaks: [],
+        };
+      })
+    );
+  };
+
+  const handleDoctorApplySingleShiftPreset = () => {
+    setDoctorScheduleWeeklyHours((prev) =>
+      prev.map((day) => {
+        if (['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'].includes(day.dayOfWeek)) {
+          return {
+            dayOfWeek: day.dayOfWeek,
+            isWorkingDay: true,
+            shifts: [{ startTime: '09:00', endTime: '17:00' }],
+            breaks: [{ startTime: '13:00', endTime: '14:00', label: 'Lunch Break' }],
+          };
+        }
+        return {
+          dayOfWeek: day.dayOfWeek,
+          isWorkingDay: false,
+          shifts: [],
+          breaks: [],
+        };
+      })
+    );
+  };
+
+  const handleDoctorMarkAllOffDuty = () => {
+    setDoctorScheduleWeeklyHours((prev) =>
+      prev.map((day) => ({
+        dayOfWeek: day.dayOfWeek,
+        isWorkingDay: false,
+        shifts: [],
+        breaks: [],
+      }))
+    );
+  };
+
+  const handleDoctorCancelAppointment = async () => {
+    if (!doctorToken || !doctorCancelModal.appointment) return;
+    setDoctorCancelModal((prev) => ({ ...prev, loading: true, error: null }));
+    const res = await cancelAppointment(
+      doctorCancelModal.appointment._id,
+      doctorToken,
+      doctorCancelModal.reason.trim() || 'Cancelled by doctor'
+    );
+    if (res.ok) {
+      setDoctorCancelModal({ isOpen: false, appointment: null, reason: '', loading: false, error: null });
+      setDoctorMessage('✅ Appointment successfully cancelled');
+      loadDoctorAppointments();
+    } else {
+      setDoctorCancelModal((prev) => ({
+        ...prev,
+        loading: false,
+        error: res.data?.message || res.error || 'Failed to cancel appointment',
+      }));
+    }
+  };
+
   const loadDoctorCockpit = useCallback(async () => {
     if (!doctorToken) return;
     // Fetch doctor intelligence and status
@@ -596,11 +962,17 @@ export default function App() {
 
   useEffect(() => {
     if (viewTab === 'doctor_cockpit' && doctorToken && isTabVisible) {
-      loadDoctorCockpit();
-      const interval = setInterval(loadDoctorCockpit, 10000);
-      return () => clearInterval(interval);
+      if (doctorSubTab === 'queue') {
+        loadDoctorCockpit();
+        const interval = setInterval(loadDoctorCockpit, 10000);
+        return () => clearInterval(interval);
+      } else if (doctorSubTab === 'appointments') {
+        loadDoctorAppointments();
+      } else if (doctorSubTab === 'schedule') {
+        loadDoctorSelfSchedule();
+      }
     }
-  }, [viewTab, doctorToken, isTabVisible, loadDoctorCockpit]);
+  }, [viewTab, doctorSubTab, doctorToken, isTabVisible, loadDoctorCockpit, loadDoctorAppointments, loadDoctorSelfSchedule]);
 
   const handleDoctorStatusUpdate = async (status) => {
     if (!doctorToken) return;
@@ -683,28 +1055,45 @@ export default function App() {
   const [profileData, setProfileData] = useState(null);
 
   const [bookingDoctor, setBookingDoctor] = useState(null);
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(() => getTodayDateIST());
   const [availability, setAvailability] = useState(null);
   const [loadingAvail, setLoadingAvail] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [bookingSuccess, setBookingSuccess] = useState(null);
   const [bookingError, setBookingError] = useState(null);
+  const [bookingLoading, setBookingLoading] = useState(false);
 
   const [myAppointments, setMyAppointments] = useState([]);
+  const [cancellationLoadingId, setCancellationLoadingId] = useState(null);
+  const [appointmentMessage, setAppointmentMessage] = useState(null);
 
   // Reception State
+  const [receptionSubTab, setReceptionSubTab] = useState('queue'); // 'queue' | 'checkin' | 'walkin'
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [selectedStaffPatient, setSelectedStaffPatient] = useState(null);
-  const [newPatientForm, setNewPatientForm] = useState({ fullName: '', phone: '', gender: 'MALE' });
+  const [isCreatingNewPatient, setIsCreatingNewPatient] = useState(false);
+  const [newPatientForm, setNewPatientForm] = useState({ fullName: '', phone: '', gender: 'MALE', dateOfBirth: '', address: '' });
+  const [newPatientCreating, setNewPatientCreating] = useState(false);
+  const [newPatientError, setNewPatientError] = useState(null);
   const [receptionDoctorId, setReceptionDoctorId] = useState('');
   const [allocatedTokenCard, setAllocatedTokenCard] = useState(null);
   const [waitingEntries, setWaitingEntries] = useState([]);
   const [activeEntries, setActiveEntries] = useState([]);
   const [skippedEntries, setSkippedEntries] = useState([]);
+  const [terminalEntries, setTerminalEntries] = useState([]);
   const [doctorQueueStatus, setDoctorQueueStatus] = useState({ isQueuePaused: false, queuePausedAt: null, queuePauseReason: null });
   const [opLoading, setOpLoading] = useState(false);
   const [receptionMessage, setReceptionMessage] = useState(null);
+
+  // Staff Clinic Appointments & Check-In State
+  const [staffAppointments, setStaffAppointments] = useState([]);
+  const [staffApptLoading, setStaffApptLoading] = useState(false);
+  const [staffApptError, setStaffApptError] = useState(null);
+  const [staffApptDate, setStaffApptDate] = useState(() => getTodayDateIST());
+  const [staffApptStatus, setStaffApptStatus] = useState('BOOKED'); // 'ALL' | 'BOOKED'
+  const [staffApptSearch, setStaffApptSearch] = useState('');
+  const [checkInLoadingId, setCheckInLoadingId] = useState(null);
 
   // Live Queue & Public Display State
   const [liveQueueData, setLiveQueueData] = useState(null);
@@ -807,13 +1196,34 @@ export default function App() {
 
   useEffect(() => {
     if (bookingDoctor && selectedDate) {
+      const today = getTodayDateIST();
+      if (selectedDate < today) {
+        setAvailability({
+          success: false,
+          availableSlots: [],
+          message: 'Selected date is in the past. Please select today or a future date.',
+          isPastDate: true,
+        });
+        setLoadingAvail(false);
+        return;
+      }
+
       setLoadingAvail(true);
       setSelectedSlot(null);
       fetchDoctorAvailability(bookingDoctor._id, selectedDate).then((res) => {
         if (res.ok && res.data) {
           setAvailability(res.data);
         } else {
-          setAvailability(null);
+          setAvailability({
+            success: false,
+            availableSlots: [],
+            message:
+              res.data?.message ||
+              res.error ||
+              'Unable to load appointment availability. Please check your connection and try again.',
+            isError: true,
+            status: res.status,
+          });
         }
         setLoadingAvail(false);
       });
@@ -831,6 +1241,8 @@ export default function App() {
   const handleProceedToAppointment = (doctor) => {
     setSelectedDoctor(null);
     setBookingDoctor(doctor);
+    const today = getTodayDateIST();
+    setSelectedDate((prev) => (!prev || prev < today ? today : prev));
     setBookingSuccess(null);
     setBookingError(null);
   };
@@ -840,7 +1252,8 @@ export default function App() {
       setShowAuthModal(true);
       return;
     }
-    if (!bookingDoctor || !selectedSlot || !selectedDate) return;
+    if (!bookingDoctor || !selectedSlot || !selectedDate || bookingLoading) return;
+    setBookingLoading(true);
     setBookingError(null);
     const bookingBody = {
       doctorId: bookingDoctor._id,
@@ -848,11 +1261,34 @@ export default function App() {
       timeSlot: selectedSlot,
     };
     const res = await createAppointment(bookingBody, patientToken);
-    if (res.ok && res.data.success) {
-      setBookingSuccess(res.data.appointment);
+    setBookingLoading(false);
+    if (res.ok && res.data?.success) {
+      const confirmedAppt = res.data.appointment || {
+        _id: res.data.appointment?._id,
+        doctorName: bookingDoctor.fullName,
+        clinicName: bookingDoctor.clinicId?.name,
+        appointmentDate: selectedDate,
+        timeSlot: selectedSlot,
+        status: 'BOOKED',
+      };
+      if (!confirmedAppt.doctorName) confirmedAppt.doctorName = bookingDoctor.fullName;
+      if (!confirmedAppt.clinicName) confirmedAppt.clinicName = bookingDoctor.clinicId?.name;
+
+      setBookingSuccess(confirmedAppt);
       setBookingDoctor(null);
+      setSelectedSlot(null);
+      loadMyAppointments();
     } else {
-      setBookingError(res.data?.message || res.error || 'Booking failed');
+      const errMsg = res.data?.message || res.error || 'Booking failed';
+      setBookingError(errMsg);
+      // If slot was taken concurrently (409 Conflict), immediately refresh availability
+      if (res.status === 409 && bookingDoctor && selectedDate) {
+        fetchDoctorAvailability(bookingDoctor._id, selectedDate).then((availRes) => {
+          if (availRes.ok && availRes.data) {
+            setAvailability(availRes.data);
+          }
+        });
+      }
     }
   };
 
@@ -871,10 +1307,22 @@ export default function App() {
   }, [viewTab, patientToken]);
 
   const handleCancelAppointment = async (apptId) => {
-    if (!patientToken) return;
+    if (!patientToken || cancellationLoadingId) return;
+    setCancellationLoadingId(apptId);
+    setAppointmentMessage(null);
     const res = await cancelAppointment(apptId, patientToken, 'Cancelled by patient from dashboard');
-    if (res.ok && res.data.success) {
+    setCancellationLoadingId(null);
+    if (res.ok && res.data?.success) {
+      setAppointmentMessage({
+        type: 'success',
+        text: '✓ Appointment cancelled successfully. Your time slot has been reopened for booking.',
+      });
       loadMyAppointments();
+    } else {
+      setAppointmentMessage({
+        type: 'error',
+        text: res.data?.message || res.error || 'Failed to cancel appointment. Please try again.',
+      });
     }
   };
 
@@ -913,16 +1361,40 @@ export default function App() {
     setSearchResults([]);
   };
 
-  const handleCreateWalkInPatient = async () => {
-    if (!staffToken || !newPatientForm.fullName || !newPatientForm.phone) return;
-    const res = await createWalkInPatient(newPatientForm, staffToken);
-    if (res.ok && res.data.patient) {
-      setSelectedStaffPatient(res.data.patient);
-      setNewPatientForm({ fullName: '', phone: '', gender: 'MALE' });
-      setReceptionMessage('✓ Walk-in patient record registered successfully');
-    } else {
-      setReceptionMessage(`Error: ${res.data?.message || res.error}`);
+  const handleCreateWalkInPatient = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!staffToken || newPatientCreating) return;
+    if (!newPatientForm.fullName.trim()) {
+      setNewPatientError('Full name is required');
+      return;
     }
+    if (!/^\d{10}$/.test(newPatientForm.phone.trim())) {
+      setNewPatientError('Valid 10-digit phone number is required');
+      return;
+    }
+    if (!newPatientForm.dateOfBirth) {
+      setNewPatientError('Date of birth is required');
+      return;
+    }
+    setNewPatientCreating(true);
+    setNewPatientError(null);
+    const res = await createWalkInPatient({
+      fullName: newPatientForm.fullName.trim(),
+      phone: newPatientForm.phone.trim(),
+      gender: newPatientForm.gender,
+      dateOfBirth: newPatientForm.dateOfBirth,
+      address: newPatientForm.address ? { street: newPatientForm.address } : undefined,
+    }, staffToken);
+
+    if (res.ok && res.data?.patient) {
+      setSelectedStaffPatient(res.data.patient);
+      setIsCreatingNewPatient(false);
+      setNewPatientForm({ fullName: '', phone: '', gender: 'MALE', dateOfBirth: '', address: '' });
+      setReceptionMessage(`✓ Created new walk-in patient profile: ${res.data.patient.fullName}`);
+    } else {
+      setNewPatientError(res.data?.message || res.error || 'Failed to create patient profile');
+    }
+    setNewPatientCreating(false);
   };
 
   const handleRegisterWalkInQueue = async () => {
@@ -950,19 +1422,90 @@ export default function App() {
       setWaitingEntries(queue.filter((q) => q.status === 'WAITING'));
       setActiveEntries(queue.filter((q) => q.status === 'CALLED' || q.status === 'IN_CONSULTATION'));
       setSkippedEntries(queue.filter((q) => q.status === 'SKIPPED'));
+      setTerminalEntries(queue.filter((q) => ['COMPLETED', 'NO_SHOW', 'CANCELLED'].includes(q.status)));
       if (res.data.doctorStatus) {
         setDoctorQueueStatus(res.data.doctorStatus);
       }
     }
   }, [staffToken]);
 
+  const loadStaffAppointments = useCallback(async (dateOverride, statusOverride) => {
+    if (!staffToken) return;
+    setStaffApptLoading(true);
+    setStaffApptError(null);
+    const dateToUse = dateOverride !== undefined ? dateOverride : staffApptDate;
+    const statusToUse = statusOverride !== undefined ? statusOverride : staffApptStatus;
+    const params = {};
+    if (dateToUse) params.date = dateToUse;
+    if (statusToUse && statusToUse !== 'ALL') params.status = statusToUse;
+
+    const res = await fetchStaffAppointments(staffToken, params);
+    if (res.ok && res.data?.appointments) {
+      setStaffAppointments(res.data.appointments);
+    } else {
+      setStaffApptError(res.data?.message || res.error || 'Failed to load clinic appointments');
+    }
+    setStaffApptLoading(false);
+  }, [staffToken, staffApptDate, staffApptStatus]);
+
+  const handleStaffCheckIn = async (appointmentId) => {
+    if (!staffToken || checkInLoadingId) return;
+    setCheckInLoadingId(appointmentId);
+    setReceptionMessage(null);
+    const res = await checkInAppointment(appointmentId, staffToken);
+    if (res.ok && res.data) {
+      const qEntry = res.data.queueEntry;
+      setAllocatedTokenCard(qEntry);
+      setReceptionMessage(`✅ Patient checked in successfully! Allocated Queue Token #${qEntry?.tokenNumber}`);
+      loadStaffAppointments();
+      loadTodayStaffQueue();
+    } else {
+      setReceptionMessage(`⚠️ Check-In Failed: ${res.data?.message || res.error || 'Check-in period not open or expired'}`);
+    }
+    setCheckInLoadingId(null);
+  };
+
+  const handleStaffRejoinSkipped = async (queueEntryId) => {
+    if (!staffToken) return;
+    setOpLoading(true);
+    setReceptionMessage(null);
+    const res = await rejoinPatient(queueEntryId, staffToken);
+    if (res.ok && res.data?.queueEntry) {
+      setReceptionMessage(`✅ Patient rejoined queue with new Token #${res.data.queueEntry.tokenNumber}`);
+      loadTodayStaffQueue();
+    } else {
+      setReceptionMessage(`⚠️ Rejoin Failed: ${res.data?.message || res.error}`);
+    }
+    setOpLoading(false);
+  };
+
+  const handleStaffCancelQueueEntry = async (id) => {
+    const reason = window.prompt('Enter operational reason for cancelling queue entry:');
+    if (reason === null) return;
+    if (!staffToken) return;
+    setOpLoading(true);
+    setReceptionMessage(null);
+    const res = await cancelQueueEntry(id, reason.trim() || 'Cancelled at reception desk', staffToken);
+    if (res.ok) {
+      setReceptionMessage('✅ Queue entry cancelled successfully');
+      loadTodayStaffQueue();
+    } else {
+      setReceptionMessage(`⚠️ Cancellation Failed: ${res.data?.message || res.error}`);
+    }
+    setOpLoading(false);
+  };
+
   useEffect(() => {
     if (viewTab === 'reception' && staffToken && isTabVisible) {
-      loadTodayStaffQueue();
-      const interval = setInterval(loadTodayStaffQueue, 10000);
-      return () => clearInterval(interval);
+      if (receptionSubTab === 'queue' || receptionSubTab === 'walkin') {
+        loadTodayStaffQueue();
+        const interval = setInterval(loadTodayStaffQueue, 10000);
+        return () => clearInterval(interval);
+      } else if (receptionSubTab === 'checkin') {
+        loadStaffAppointments();
+      }
     }
-  }, [viewTab, staffToken, isTabVisible, loadTodayStaffQueue]);
+  }, [viewTab, receptionSubTab, staffToken, isTabVisible, loadTodayStaffQueue, loadStaffAppointments]);
 
   // Reception Queue Action Handlers
   const handleCallNext = async () => {
@@ -1192,7 +1735,7 @@ export default function App() {
   };
 
   // Admin Governance State
-  const [adminSubTab, setAdminSubTab] = useState('policy'); // 'policy' | 'queue_audit' | 'financial_audit'
+  const [adminSubTab, setAdminSubTab] = useState('policy'); // 'policy' | 'queue_audit' | 'financial_audit' | 'schedules'
   const [governanceClinicId, setGovernanceClinicId] = useState('');
   const [clinicPolicyForm, setClinicPolicyForm] = useState({
     selfCheckInLeadMinutes: 60,
@@ -1216,6 +1759,333 @@ export default function App() {
   const [financialAuditPage, setFinancialAuditPage] = useState(1);
   const [financialAuditAction, setFinancialAuditAction] = useState('');
   const [financialAuditLoading, setFinancialAuditLoading] = useState(false);
+
+  // Admin Doctor Schedules State (Phase 2)
+  const [adminDoctors, setAdminDoctors] = useState([]);
+  const [adminDoctorsLoading, setAdminDoctorsLoading] = useState(false);
+  const [adminDoctorsError, setAdminDoctorsError] = useState(null);
+  const [adminDoctorSearch, setAdminDoctorSearch] = useState('');
+  const [adminScheduleFilter, setAdminScheduleFilter] = useState('ALL'); // 'ALL' | 'CONFIGURED' | 'UNCONFIGURED'
+  const [selectedAdminDoctor, setSelectedAdminDoctor] = useState(null);
+  const [scheduleWeeklyHours, setScheduleWeeklyHours] = useState(createEmptyWeeklyHours);
+  const [scheduleDuration, setScheduleDuration] = useState(15);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleMessage, setScheduleMessage] = useState(null);
+
+  // Admin Operations & Roster State (Phase 6)
+  const [adminClinics, setAdminClinics] = useState([]);
+  const [adminClinicsLoading, setAdminClinicsLoading] = useState(false);
+  const [adminStaffList, setAdminStaffList] = useState([]);
+  const [adminStaffLoading, setAdminStaffLoading] = useState(false);
+  const [adminRosterFilter, setAdminRosterFilter] = useState('ALL'); // 'ALL' | 'CLINICS' | 'DOCTORS' | 'STAFF'
+  const [adminRosterSearch, setAdminRosterSearch] = useState('');
+
+  const initScheduleForDoctor = useCallback((doctor) => {
+    if (!doctor) return;
+    setSelectedAdminDoctor(doctor);
+    setScheduleDuration(doctor.averageConsultationDurationMinutes || 15);
+    setScheduleMessage(null);
+
+    const existingHours = Array.isArray(doctor.schedule) ? doctor.schedule : [];
+    const hoursMap = new Map();
+    for (const day of existingHours) {
+      if (day && day.dayOfWeek) {
+        hoursMap.set(day.dayOfWeek.toUpperCase(), day);
+      }
+    }
+
+    const merged = DAYS_OF_WEEK.map((dayName) => {
+      const existing = hoursMap.get(dayName);
+      if (existing) {
+        return {
+          dayOfWeek: dayName,
+          isWorkingDay: Boolean(existing.isWorkingDay),
+          shifts: Array.isArray(existing.shifts)
+            ? existing.shifts.map((s) => ({
+                startTime: s.startTime || '09:00',
+                endTime: s.endTime || '13:00',
+              }))
+            : [],
+          breaks: Array.isArray(existing.breaks)
+            ? existing.breaks.map((b) => ({
+                startTime: b.startTime || '13:00',
+                endTime: b.endTime || '14:00',
+                label: b.label || 'Break',
+              }))
+            : [],
+        };
+      }
+      return {
+        dayOfWeek: dayName,
+        isWorkingDay: false,
+        shifts: [],
+        breaks: [],
+      };
+    });
+
+    setScheduleWeeklyHours(merged);
+  }, []);
+
+  const loadAdminDoctors = useCallback(async () => {
+    if (!adminToken) return;
+    setAdminDoctorsLoading(true);
+    setAdminDoctorsError(null);
+    const res = await fetchAdminDoctors(adminToken);
+    if (res.ok && res.data?.doctors) {
+      const docs = res.data.doctors;
+      setAdminDoctors(docs);
+      setSelectedAdminDoctor((prev) => {
+        if (!prev) {
+          const first = docs[0] || null;
+          if (first) initScheduleForDoctor(first);
+          return first;
+        }
+        const updated = docs.find((d) => d._id === prev._id);
+        if (updated) {
+          initScheduleForDoctor(updated);
+          return updated;
+        }
+        const first = docs[0] || null;
+        if (first) initScheduleForDoctor(first);
+        return first;
+      });
+    } else {
+      setAdminDoctorsError(res.data?.message || res.error || 'Failed to load doctors list');
+    }
+    setAdminDoctorsLoading(false);
+  }, [adminToken, initScheduleForDoctor]);
+
+  const handleToggleWorkingDay = (dayIndex) => {
+    setScheduleWeeklyHours((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[dayIndex] };
+      const nextVal = !target.isWorkingDay;
+      target.isWorkingDay = nextVal;
+      if (nextVal && (!target.shifts || target.shifts.length === 0)) {
+        target.shifts = [{ startTime: '09:00', endTime: '13:00' }];
+      }
+      if (!nextVal) {
+        target.shifts = [];
+        target.breaks = [];
+      }
+      copy[dayIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleAddShift = (dayIndex) => {
+    setScheduleWeeklyHours((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[dayIndex] };
+      const currentShifts = Array.isArray(target.shifts) ? [...target.shifts] : [];
+      let nextStart = '14:00';
+      let nextEnd = '18:00';
+      if (currentShifts.length > 0) {
+        const lastShift = currentShifts[currentShifts.length - 1];
+        if (lastShift.endTime < '17:00') {
+          nextStart = '17:00';
+          nextEnd = '20:00';
+        } else {
+          nextStart = '18:00';
+          nextEnd = '21:00';
+        }
+      }
+      currentShifts.push({ startTime: nextStart, endTime: nextEnd });
+      target.shifts = currentShifts;
+      copy[dayIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleRemoveShift = (dayIndex, shiftIndex) => {
+    setScheduleWeeklyHours((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[dayIndex] };
+      target.shifts = (target.shifts || []).filter((_, idx) => idx !== shiftIndex);
+      copy[dayIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleShiftChange = (dayIndex, shiftIndex, field, value) => {
+    setScheduleWeeklyHours((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[dayIndex] };
+      const shifts = [...(target.shifts || [])];
+      shifts[shiftIndex] = { ...shifts[shiftIndex], [field]: value };
+      target.shifts = shifts;
+      copy[dayIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleAddBreak = (dayIndex) => {
+    setScheduleWeeklyHours((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[dayIndex] };
+      const currentBreaks = Array.isArray(target.breaks) ? [...target.breaks] : [];
+      currentBreaks.push({ startTime: '13:00', endTime: '14:00', label: 'Lunch' });
+      target.breaks = currentBreaks;
+      copy[dayIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleRemoveBreak = (dayIndex, breakIndex) => {
+    setScheduleWeeklyHours((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[dayIndex] };
+      target.breaks = (target.breaks || []).filter((_, idx) => idx !== breakIndex);
+      copy[dayIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleBreakChange = (dayIndex, breakIndex, field, value) => {
+    setScheduleWeeklyHours((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[dayIndex] };
+      const breaks = [...(target.breaks || [])];
+      breaks[breakIndex] = { ...breaks[breakIndex], [field]: value };
+      target.breaks = breaks;
+      copy[dayIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleApplyMonToFriPreset = () => {
+    setScheduleWeeklyHours((prev) => {
+      return prev.map((day) => {
+        if (['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'].includes(day.dayOfWeek)) {
+          return {
+            dayOfWeek: day.dayOfWeek,
+            isWorkingDay: true,
+            shifts: [
+              { startTime: '09:00', endTime: '13:00' },
+              { startTime: '16:00', endTime: '20:00' },
+            ],
+            breaks: [],
+          };
+        }
+        return {
+          dayOfWeek: day.dayOfWeek,
+          isWorkingDay: false,
+          shifts: [],
+          breaks: [],
+        };
+      });
+    });
+  };
+
+  const handleApplySingleShiftPreset = () => {
+    setScheduleWeeklyHours((prev) => {
+      return prev.map((day) => {
+        if (['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'].includes(day.dayOfWeek)) {
+          return {
+            dayOfWeek: day.dayOfWeek,
+            isWorkingDay: true,
+            shifts: [{ startTime: '09:00', endTime: '17:00' }],
+            breaks: [{ startTime: '13:00', endTime: '14:00', label: 'Lunch Break' }],
+          };
+        }
+        return {
+          dayOfWeek: day.dayOfWeek,
+          isWorkingDay: false,
+          shifts: [],
+          breaks: [],
+        };
+      });
+    });
+  };
+
+  const handleMarkAllOffDuty = () => {
+    setScheduleWeeklyHours(createEmptyWeeklyHours());
+  };
+
+  const handleResetSchedule = () => {
+    if (selectedAdminDoctor) {
+      initScheduleForDoctor(selectedAdminDoctor);
+    }
+  };
+
+  const handleSaveSchedule = async (e) => {
+    e?.preventDefault();
+    if (!selectedAdminDoctor || !adminToken) return;
+
+    const durationNum = Number(scheduleDuration);
+    if (isNaN(durationNum) || durationNum < 1) {
+      setScheduleMessage({
+        type: 'error',
+        text: 'Average consultation duration must be a positive integer (minimum 1 minute).',
+      });
+      return;
+    }
+
+    for (const day of scheduleWeeklyHours) {
+      if (day.isWorkingDay) {
+        if (!day.shifts || day.shifts.length === 0) {
+          setScheduleMessage({
+            type: 'error',
+            text: `${day.dayOfWeek} is marked as a working day but has no shifts configured. Please add a shift or mark it off-duty.`,
+          });
+          return;
+        }
+        for (const s of day.shifts) {
+          if (!s.startTime || !s.endTime) {
+            setScheduleMessage({
+              type: 'error',
+              text: `Please enter valid start and end times for all shifts on ${day.dayOfWeek}.`,
+            });
+            return;
+          }
+          if (s.startTime >= s.endTime) {
+            setScheduleMessage({
+              type: 'error',
+              text: `On ${day.dayOfWeek}, shift start time (${s.startTime}) must be strictly earlier than end time (${s.endTime}).`,
+            });
+            return;
+          }
+        }
+      }
+    }
+
+    setScheduleSaving(true);
+    setScheduleMessage(null);
+
+    const payload = {
+      weeklyHours: scheduleWeeklyHours,
+      averageConsultationDurationMinutes: durationNum,
+    };
+
+    const res = await updateDoctorScheduleAdmin(selectedAdminDoctor._id, payload, adminToken);
+    setScheduleSaving(false);
+
+    if (res.ok && res.data?.success) {
+      setScheduleMessage({
+        type: 'success',
+        text: `✓ Doctor schedule and consultation duration for Dr. ${selectedAdminDoctor.fullName} saved successfully!`,
+      });
+      await loadAdminDoctors();
+    } else {
+      setScheduleMessage({
+        type: 'error',
+        text: res.data?.message || res.error || 'Failed to update doctor schedule.',
+      });
+    }
+  };
+
+  const filteredAdminDoctors = adminDoctors.filter((doc) => {
+    if (adminScheduleFilter === 'CONFIGURED' && !doc.hasSchedule) return false;
+    if (adminScheduleFilter === 'UNCONFIGURED' && doc.hasSchedule) return false;
+    if (adminDoctorSearch.trim()) {
+      const q = adminDoctorSearch.toLowerCase();
+      const matchName = doc.fullName?.toLowerCase().includes(q);
+      const matchSpecialty = doc.specialtyId?.name?.toLowerCase().includes(q);
+      const matchClinic = doc.clinicId?.name?.toLowerCase().includes(q);
+      if (!matchName && !matchSpecialty && !matchClinic) return false;
+    }
+    return true;
+  });
 
   const loadClinicPolicy = useCallback(async (cId) => {
     const targetClinicId = cId || governanceClinicId || doctors[0]?.clinicId?._id || doctors[0]?.clinicId;
@@ -1284,13 +2154,50 @@ export default function App() {
     setFinancialAuditLoading(false);
   }, [adminToken, financialAuditAction, governanceClinicId]);
 
+  const loadAdminRosterData = useCallback(async () => {
+    if (!adminToken) return;
+    setAdminClinicsLoading(true);
+    setAdminStaffLoading(true);
+    setAdminDoctorsLoading(true);
+    try {
+      const [clinicsRes, staffRes, doctorsRes] = await Promise.all([
+        fetchAdminClinics(adminToken),
+        fetchAdminStaff(adminToken),
+        fetchAdminDoctors(adminToken),
+      ]);
+      if (clinicsRes.ok && clinicsRes.data?.clinics) {
+        setAdminClinics(clinicsRes.data.clinics);
+      }
+      if (staffRes.ok && staffRes.data?.staff) {
+        setAdminStaffList(staffRes.data.staff);
+      }
+      if (doctorsRes.ok && doctorsRes.data?.doctors) {
+        setAdminDoctors(doctorsRes.data.doctors);
+      }
+    } catch (err) {
+      console.error('Failed to load admin roster:', err);
+    } finally {
+      setAdminClinicsLoading(false);
+      setAdminStaffLoading(false);
+      setAdminDoctorsLoading(false);
+    }
+  }, [adminToken]);
+
+  useEffect(() => {
+    if (!receptionDoctorId && doctors.length > 0) {
+      setReceptionDoctorId(doctors[0]._id);
+    }
+  }, [receptionDoctorId, doctors]);
+
   useEffect(() => {
     if (viewTab === 'governance' && adminToken) {
       if (adminSubTab === 'policy') loadClinicPolicy();
       if (adminSubTab === 'queue_audit') loadQueueAuditLogs(1);
       if (adminSubTab === 'financial_audit') loadFinancialAuditLogs(1);
+      if (adminSubTab === 'schedules') loadAdminDoctors();
+      if (adminSubTab === 'roster') loadAdminRosterData();
     }
-  }, [viewTab, adminSubTab, adminToken, loadClinicPolicy, loadQueueAuditLogs, loadFinancialAuditLogs]);
+  }, [viewTab, adminSubTab, adminToken, loadClinicPolicy, loadQueueAuditLogs, loadFinancialAuditLogs, loadAdminDoctors, loadAdminRosterData]);
 
   // Live Queue & Public Polling
   const loadLiveQueue = useCallback(async () => {
@@ -1575,30 +2482,46 @@ export default function App() {
       <main className="app-container">
 
       {/* VIEW: Doctor Examination Cockpit (Phase 13) */}
+      {/* VIEW: Doctor Examination Cockpit & Workspace (Phase 5) */}
       {viewTab === 'doctor_cockpit' && (
         <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+          {/* Header & Sub-Tabs Navigation */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '1rem', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
             <div>
-              <h2 style={{ fontSize: '1.4rem', color: 'var(--primary)', margin: 0 }}>🩺 Doctor Examination Cockpit</h2>
+              <h2 style={{ fontSize: '1.4rem', color: 'var(--primary)', margin: 0 }}>🩺 Doctor Clinical Workspace</h2>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                Live exam room workflow, consultation duration metrics & queue controls
+                Live exam room workflow, consultation records, and recurring practice schedule management
               </div>
             </div>
 
-            {/* Live Operational Status Selector */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Status:</span>
-              {['AVAILABLE', 'BUSY', 'ON_BREAK', 'UNAVAILABLE', 'OFFLINE'].map((st) => (
-                <button
-                  key={st}
-                  disabled={doctorOpLoading}
-                  className={`btn ${doctorLiveStatus === st ? 'btn-primary' : 'btn-secondary'}`}
-                  style={{ fontSize: '0.75rem', padding: '0.35rem 0.6rem' }}
-                  onClick={() => handleDoctorStatusUpdate(st)}
-                >
-                  {st}
-                </button>
-              ))}
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                className={`btn ${doctorSubTab === 'queue' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: '0.85rem' }}
+                onClick={() => setDoctorSubTab('queue')}
+              >
+                🚪 Live Exam & Queue
+              </button>
+              <button
+                className={`btn ${doctorSubTab === 'appointments' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: '0.85rem' }}
+                onClick={() => {
+                  setDoctorSubTab('appointments');
+                  loadDoctorAppointments();
+                }}
+              >
+                📅 Consultations & Appointments
+              </button>
+              <button
+                className={`btn ${doctorSubTab === 'schedule' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: '0.85rem' }}
+                onClick={() => {
+                  setDoctorSubTab('schedule');
+                  loadDoctorSelfSchedule();
+                }}
+              >
+                ⏰ My Practice Schedule
+              </button>
             </div>
           </div>
 
@@ -1608,131 +2531,636 @@ export default function App() {
             </div>
           )}
 
-          {/* Top Operational Metrics Bar */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
-            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Today Completed</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: 'var(--primary)' }}>
-                {doctorIntel?.todayCompletedCount ?? 0} Patients
+          {/* SUB-TAB 1: Live Exam & Queue (Existing Cockpit) */}
+          {doctorSubTab === 'queue' && (
+            <div>
+              {/* Live Operational Status Selector */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#090d16', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.25rem', flexWrap: 'gap', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>Active Practice Status:</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  {['AVAILABLE', 'BUSY', 'ON_BREAK', 'UNAVAILABLE', 'OFFLINE'].map((st) => (
+                    <button
+                      key={st}
+                      disabled={doctorOpLoading}
+                      className={`btn ${doctorLiveStatus === st ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ fontSize: '0.75rem', padding: '0.35rem 0.6rem' }}
+                      onClick={() => handleDoctorStatusUpdate(st)}
+                    >
+                      {st}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Currently Waiting</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#eab308' }}>
-                {doctorQueueData.length} In Queue
-              </div>
-            </div>
-            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Avg Speed (Configured)</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#38bdf8' }}>
-                {doctorIntel?.configuredAvgDurationMin ?? 15} mins
-              </div>
-            </div>
-            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Predicted Next Duration</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#a78bfa' }}>
-                {doctorIntel?.durationPrediction?.predictedDurationMinutes ?? 15} mins
-              </div>
-            </div>
-          </div>
 
-          {/* Active Examination Room Card */}
-          <div style={{ background: '#090d16', padding: '1.25rem', borderRadius: '10px', border: '1px solid var(--border)', marginBottom: '1.5rem' }}>
-            <h3 style={{ fontSize: '1.1rem', color: '#f8fafc', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>🚪 Examination Room Status</span>
-              {doctorActivePatient && (
-                <span style={{ fontSize: '0.8rem', padding: '0.2rem 0.6rem', borderRadius: '999px', background: doctorActivePatient.status === 'IN_CONSULTATION' ? '#065f46' : '#854d0e', color: '#fff' }}>
-                  {doctorActivePatient.status}
-                </span>
+              {/* Top Operational Metrics Bar */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Today Completed</div>
+                  <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: 'var(--primary)' }}>
+                    {doctorIntel?.todayCompletedCount ?? 0} Patients
+                  </div>
+                </div>
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Currently Waiting</div>
+                  <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#eab308' }}>
+                    {doctorQueueData.length} In Queue
+                  </div>
+                </div>
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Avg Speed (Configured)</div>
+                  <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#38bdf8' }}>
+                    {doctorIntel?.configuredAvgDurationMin ?? 15} mins
+                  </div>
+                </div>
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Predicted Next Duration</div>
+                  <div style={{ fontSize: '1.6rem', fontWeight: 'bold', color: '#a78bfa' }}>
+                    {doctorIntel?.durationPrediction?.predictedDurationMinutes ?? 15} mins
+                  </div>
+                </div>
+              </div>
+
+              {/* Active Examination Room Card */}
+              <div style={{ background: '#090d16', padding: '1.25rem', borderRadius: '10px', border: '1px solid var(--border)', marginBottom: '1.5rem' }}>
+                <h3 style={{ fontSize: '1.1rem', color: '#f8fafc', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>🚪 Examination Room Status</span>
+                  {doctorActivePatient && (
+                    <span style={{ fontSize: '0.8rem', padding: '0.2rem 0.6rem', borderRadius: '999px', background: doctorActivePatient.status === 'IN_CONSULTATION' ? '#065f46' : '#854d0e', color: '#fff' }}>
+                      {doctorActivePatient.status}
+                    </span>
+                  )}
+                </h3>
+
+                {doctorActivePatient ? (
+                  <div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                      <div>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Token Number:</span>
+                        <div style={{ fontSize: '1.8rem', fontWeight: 'bold', color: 'var(--primary)' }}>
+                          #{doctorActivePatient.tokenNumber}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Patient Name:</span>
+                        <div style={{ fontSize: '1.1rem', fontWeight: 600 }}>
+                          {doctorActivePatient.patientId?.fullName || 'Patient'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Source / Priority:</span>
+                        <div style={{ fontSize: '1rem' }}>
+                          {doctorActivePatient.source} | {doctorActivePatient.priority}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      {doctorActivePatient.status === 'CALLED' && (
+                        <button className="btn btn-primary" disabled={doctorOpLoading} onClick={handleDoctorStartConsultation}>
+                          ▶ Start Consultation
+                        </button>
+                      )}
+                      {doctorActivePatient.status === 'IN_CONSULTATION' && (
+                        <button className="btn btn-primary" disabled={doctorOpLoading} onClick={handleDoctorCompleteConsultation}>
+                          ✓ Complete Consultation
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
+                    <p>No patient is currently in the examination room.</p>
+                    <button className="btn btn-primary" disabled={doctorOpLoading || doctorQueueData.length === 0} onClick={handleDoctorCallNext}>
+                      📢 Call Next Patient
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Today's Waiting Queue Table */}
+              <h3 style={{ fontSize: '1.1rem', color: '#f8fafc', marginBottom: '0.75rem' }}>
+                📋 Waiting Queue ({doctorQueueData.length})
+              </h3>
+              {doctorQueueData.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)', background: '#090d16', borderRadius: '8px' }}>
+                  No patients waiting in queue today.
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="schedule-table">
+                    <thead>
+                      <tr>
+                        <th>Token</th>
+                        <th>Patient</th>
+                        <th>Source</th>
+                        <th>Priority</th>
+                        <th>Joined At</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {doctorQueueData.map((q) => (
+                        <tr key={q._id}>
+                          <td style={{ fontWeight: 'bold', color: 'var(--primary)' }}>#{q.tokenNumber}</td>
+                          <td>{q.patientId?.fullName || 'Patient'}</td>
+                          <td>{q.source}</td>
+                          <td>{q.priority}</td>
+                          <td>{new Date(q.joinedAt).toLocaleTimeString()}</td>
+                          <td>
+                            {!doctorActivePatient && (
+                              <button className="btn btn-secondary" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} onClick={handleDoctorCallNext}>
+                                Call
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
-            </h3>
+            </div>
+          )}
 
-            {doctorActivePatient ? (
-              <div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-                  <div>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Token Number:</span>
-                    <div style={{ fontSize: '1.8rem', fontWeight: 'bold', color: 'var(--primary)' }}>
-                      #{doctorActivePatient.tokenNumber}
-                    </div>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Patient Name:</span>
-                    <div style={{ fontSize: '1.1rem', fontWeight: 600 }}>
-                      {doctorActivePatient.patientId?.fullName || 'Patient'}
-                    </div>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Source / Priority:</span>
-                    <div style={{ fontSize: '1rem' }}>
-                      {doctorActivePatient.source} | {doctorActivePatient.priority}
-                    </div>
-                  </div>
+          {/* SUB-TAB 2: Consultations & Appointments (Phase 5) */}
+          {doctorSubTab === 'appointments' && (
+            <div className="doctor-appts-container">
+              {/* Filter & Search Bar */}
+              <div className="doctor-filter-bar">
+                {/* Scope selector */}
+                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    className={`btn btn-xs ${doctorApptScope === 'today' && !doctorApptDate ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }}
+                    onClick={() => {
+                      setDoctorApptScope('today');
+                      setDoctorApptDate('');
+                      loadDoctorAppointments('today', '');
+                    }}
+                  >
+                    📅 Today
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-xs ${doctorApptScope === 'upcoming' && !doctorApptDate ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }}
+                    onClick={() => {
+                      setDoctorApptScope('upcoming');
+                      setDoctorApptDate('');
+                      loadDoctorAppointments('upcoming', '');
+                    }}
+                  >
+                    🔜 Upcoming
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-xs ${doctorApptScope === 'past' && !doctorApptDate ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }}
+                    onClick={() => {
+                      setDoctorApptScope('past');
+                      setDoctorApptDate('');
+                      loadDoctorAppointments('past', '');
+                    }}
+                  >
+                    📜 Past & History
+                  </button>
                 </div>
 
-                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  {doctorActivePatient.status === 'CALLED' && (
-                    <button className="btn btn-primary" disabled={doctorOpLoading} onClick={handleDoctorStartConsultation}>
-                      ▶ Start Consultation
-                    </button>
-                  )}
-                  {doctorActivePatient.status === 'IN_CONSULTATION' && (
-                    <button className="btn btn-primary" disabled={doctorOpLoading} onClick={handleDoctorCompleteConsultation}>
-                      ✓ Complete Consultation
-                    </button>
-                  )}
+                {/* Specific Date & Search Filter */}
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Date:</span>
+                    <input
+                      type="date"
+                      className="filter-input"
+                      style={{ fontSize: '0.8rem', padding: '0.3rem 0.5rem' }}
+                      value={doctorApptDate}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDoctorApptDate(val);
+                        if (val) {
+                          loadDoctorAppointments('', val);
+                        } else {
+                          loadDoctorAppointments(doctorApptScope, '');
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <input
+                    type="text"
+                    className="filter-input"
+                    placeholder="Search patient, phone, ID..."
+                    style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem', minWidth: '180px' }}
+                    value={doctorApptSearch}
+                    onChange={(e) => setDoctorApptSearch(e.target.value)}
+                  />
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }}
+                    onClick={() => loadDoctorAppointments()}
+                    disabled={doctorApptLoading}
+                  >
+                    {doctorApptLoading ? 'Refreshing...' : '🔄 Refresh'}
+                  </button>
                 </div>
               </div>
-            ) : (
-              <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
-                <p>No patient is currently in the examination room.</p>
-                <button className="btn btn-primary" disabled={doctorOpLoading || doctorQueueData.length === 0} onClick={handleDoctorCallNext}>
-                  📢 Call Next Patient
+
+              {doctorApptError && (
+                <div style={{ background: '#450a0a', border: '1px solid #ef4444', color: '#fee2e2', padding: '0.75rem 1rem', borderRadius: '8px', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>⚠️ {doctorApptError}</span>
+                  <button className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }} onClick={() => loadDoctorAppointments()}>
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {/* Appointments List / Grid */}
+              {doctorApptLoading && doctorAppointments.length === 0 ? (
+                <div className="empty-state" style={{ padding: '3rem 1rem', textAlign: 'center' }}>
+                  Loading appointments...
+                </div>
+              ) : (() => {
+                const query = doctorApptSearch.toLowerCase().trim();
+                const filtered = doctorAppointments.filter((a) => {
+                  if (!query) return true;
+                  const patientName = (a.patientId?.fullName || '').toLowerCase();
+                  const patientPhone = (a.patientId?.phone || '').toLowerCase();
+                  const apptId = (a._id || '').toLowerCase();
+                  return patientName.includes(query) || patientPhone.includes(query) || apptId.includes(query);
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="empty-state" style={{ padding: '3rem 1rem', textAlign: 'center', background: '#090d16', borderRadius: '8px' }}>
+                      <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+                        {doctorApptSearch
+                          ? `No appointments found matching "${doctorApptSearch}".`
+                          : `No appointments found for the selected ${doctorApptDate ? `date (${doctorApptDate})` : doctorApptScope} view.`}
+                      </p>
+                      {doctorApptSearch && (
+                        <button
+                          className="btn btn-secondary"
+                          style={{ marginTop: '0.75rem', fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                          onClick={() => setDoctorApptSearch('')}
+                        >
+                          Clear Search
+                        </button>
+                      )}
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="doctor-appts-grid">
+                    {filtered.map((appt) => {
+                      const patient = appt.patientId;
+                      const age = patient?.dateOfBirth ? getAgeFromDob(patient.dateOfBirth) : null;
+                      const isBooked = appt.status === 'BOOKED';
+                      const isCancelled = appt.status === 'CANCELLED';
+                      const isCompleted = appt.status === 'COMPLETED';
+
+                      let badgeClass = 'badge-secondary';
+                      if (isBooked) badgeClass = 'badge-primary';
+                      if (isCompleted) badgeClass = 'badge-success';
+                      if (isCancelled) badgeClass = 'badge-danger';
+
+                      return (
+                        <div key={appt._id} className="doctor-appt-card">
+                          <div className="doctor-appt-card-header">
+                            <div>
+                              <div className="doctor-appt-patient-name">
+                                {patient?.fullName || 'Walk-in / Unregistered Patient'}
+                              </div>
+                              <div className="doctor-appt-patient-meta">
+                                {patient?.gender && <span>{patient.gender}</span>}
+                                {age !== null && <span>• {age} yrs</span>}
+                                {patient?.phone && <span>• 📞 {patient.phone}</span>}
+                              </div>
+                            </div>
+                            <span className={`badge ${badgeClass}`} style={{ fontSize: '0.75rem' }}>
+                              {appt.status}
+                            </span>
+                          </div>
+
+                          <div className="doctor-appt-time-slot">
+                            <span style={{ fontWeight: 600, color: 'var(--primary-light)' }}>
+                              🗓️ {appt.appointmentDate}
+                            </span>
+                            <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>
+                              ⏰ {appt.timeSlot?.startTime} – {appt.timeSlot?.endTime}
+                            </span>
+                          </div>
+
+                          <div className="doctor-appt-details">
+                            {appt.clinicId && (
+                              <div>🏥 <strong>{appt.clinicId.name}</strong> {appt.clinicId.address ? `(${appt.clinicId.address})` : ''}</div>
+                            )}
+                            {appt.specialtyId && (
+                              <div>🩺 Specialty: {appt.specialtyId.name}</div>
+                            )}
+                            <div style={{ fontSize: '0.75rem', opacity: 0.8 }}>
+                              Ref: <code>#{appt._id}</code>
+                            </div>
+                            {isCancelled && (
+                              <div style={{ marginTop: '0.25rem', color: '#f87171', fontSize: '0.78rem' }}>
+                                <div><strong>Cancelled:</strong> {appt.cancelledAt ? new Date(appt.cancelledAt).toLocaleString() : 'N/A'}</div>
+                                {appt.cancellationReason && <div><strong>Reason:</strong> {appt.cancellationReason}</div>}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="doctor-appt-actions">
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                              Consultation Slot
+                            </span>
+                            {isBooked && (
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', color: 'var(--status-danger)' }}
+                                onClick={() => setDoctorCancelModal({ isOpen: true, appointment: appt, reason: '', loading: false, error: null })}
+                              >
+                                Cancel Consultation
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* SUB-TAB 3: My Practice Schedule (Phase 5) */}
+          {doctorSubTab === 'schedule' && (
+            <div style={{ background: '#090d16', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              {/* Doctor Practice Header */}
+              <div className="admin-doc-editor-header" style={{ marginBottom: '1.25rem' }}>
+                <div>
+                  <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '1.15rem' }}>
+                    ⏰ Recurring Practice Schedule & Consultation Duration
+                  </h3>
+                  <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                    {doctorProfileData?.fullName ? `Dr. ${doctorProfileData.fullName}` : 'My Account'} • Clinic: <strong>{doctorProfileData?.clinic?.name || 'Assigned Clinic'}</strong>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>
+                      Consultation Duration
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <input
+                        type="number"
+                        min="1"
+                        max="240"
+                        className="filter-input"
+                        value={doctorScheduleDuration}
+                        onChange={(e) => setDoctorScheduleDuration(e.target.value)}
+                        style={{ width: '80px', textAlign: 'center', padding: '0.3rem 0.5rem', fontWeight: 600 }}
+                      />
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>min</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {doctorScheduleMessage && (
+                <div style={{ background: doctorScheduleMessage.includes('✅') ? '#064e3b' : '#451a03', border: `1px solid ${doctorScheduleMessage.includes('✅') ? '#10b981' : '#f59e0b'}`, padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1.25rem', fontSize: '0.85rem' }}>
+                  {doctorScheduleMessage}
+                </div>
+              )}
+
+              {/* Quick Presets */}
+              <div className="admin-schedule-presets-bar">
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                  Quick Presets:
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                  onClick={handleDoctorApplyMonToFriPreset}
+                  title="Set Mon-Fri 09:00-13:00 and 16:00-20:00"
+                >
+                  ⚡ Mon–Fri (Two Shifts: 9-1, 4-8)
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                  onClick={handleDoctorApplySingleShiftPreset}
+                  title="Set Mon-Sat 09:00-17:00 with 1h Lunch Break"
+                >
+                  ⚡ Mon–Sat (9-5 + Lunch)
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', color: 'var(--status-danger)' }}
+                  onClick={handleDoctorMarkAllOffDuty}
+                  title="Set all days to off-duty"
+                >
+                  🚫 Mark All Off-Duty
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                  onClick={loadDoctorSelfSchedule}
+                  disabled={doctorScheduleLoading}
+                  title="Discard changes and reload saved schedule"
+                >
+                  ↺ Reset Changes
                 </button>
               </div>
-            )}
-          </div>
 
-          {/* Today's Waiting Queue Table */}
-          <h3 style={{ fontSize: '1.1rem', color: '#f8fafc', marginBottom: '0.75rem' }}>
-            📋 Waiting Queue ({doctorQueueData.length})
-          </h3>
-          {doctorQueueData.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)', background: '#090d16', borderRadius: '8px' }}>
-              No patients waiting in queue today.
-            </div>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table className="schedule-table">
-                <thead>
-                  <tr>
-                    <th>Token</th>
-                    <th>Patient</th>
-                    <th>Source</th>
-                    <th>Priority</th>
-                    <th>Joined At</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {doctorQueueData.map((q) => (
-                    <tr key={q._id}>
-                      <td style={{ fontWeight: 'bold', color: 'var(--primary)' }}>#{q.tokenNumber}</td>
-                      <td>{q.patientId?.fullName || 'Patient'}</td>
-                      <td>{q.source}</td>
-                      <td>{q.priority}</td>
-                      <td>{new Date(q.joinedAt).toLocaleTimeString()}</td>
-                      <td>
-                        {!doctorActivePatient && (
-                          <button className="btn btn-secondary" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} onClick={handleDoctorCallNext}>
-                            Call
-                          </button>
+              {/* 7-Day Schedule Editor */}
+              {doctorScheduleLoading ? (
+                <div className="empty-state" style={{ padding: '3rem 1rem', textAlign: 'center' }}>
+                  Loading schedule details...
+                </div>
+              ) : (
+                <div className="admin-schedule-days-list">
+                  {doctorScheduleWeeklyHours.map((dayObj, dayIdx) => (
+                    <div
+                      key={dayObj.dayOfWeek}
+                      className={`admin-schedule-day-card ${dayObj.isWorkingDay ? 'day-active' : 'day-inactive'}`}
+                    >
+                      <div className="day-card-header">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                          <label className="day-toggle-label">
+                            <input
+                              type="checkbox"
+                              checked={dayObj.isWorkingDay}
+                              onChange={() => handleDoctorToggleWorkingDay(dayIdx)}
+                              style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--primary)' }}
+                            />
+                            <span style={{ fontWeight: 700, fontSize: '0.9rem', color: dayObj.isWorkingDay ? 'var(--text-main)' : 'var(--text-muted)' }}>
+                              {dayObj.dayOfWeek}
+                            </span>
+                          </label>
+                          {dayObj.isWorkingDay ? (
+                            <span className="badge badge-success" style={{ fontSize: '0.68rem', padding: '0.1rem 0.4rem' }}>
+                              Working ({dayObj.shifts?.length || 0} shift{dayObj.shifts?.length === 1 ? '' : 's'})
+                            </span>
+                          ) : (
+                            <span className="badge badge-secondary" style={{ fontSize: '0.68rem', padding: '0.1rem 0.4rem', opacity: 0.7 }}>
+                              Off-Duty
+                            </span>
+                          )}
+                        </div>
+                        {dayObj.isWorkingDay && (
+                          <div style={{ display: 'flex', gap: '0.4rem' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                              onClick={() => handleDoctorAddShift(dayIdx)}
+                            >
+                              + Add Shift
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                              onClick={() => handleDoctorAddBreak(dayIdx)}
+                            >
+                              + Add Break
+                            </button>
+                          </div>
                         )}
-                      </td>
-                    </tr>
+                      </div>
+
+                      {dayObj.isWorkingDay && (
+                        <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                          {/* Shifts */}
+                          <div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, marginBottom: '0.35rem' }}>
+                              Working Shifts:
+                            </div>
+                            {(!dayObj.shifts || dayObj.shifts.length === 0) ? (
+                              <div style={{ fontSize: '0.75rem', color: '#f87171', fontStyle: 'italic' }}>
+                                ⚠️ Working day must have at least one shift
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                {dayObj.shifts.map((shift, sIdx) => (
+                                  <div key={sIdx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)', width: '50px' }}>
+                                      Shift {sIdx + 1}:
+                                    </span>
+                                    <input
+                                      type="time"
+                                      className="filter-input"
+                                      value={shift.startTime}
+                                      onChange={(e) => handleDoctorShiftChange(dayIdx, sIdx, 'startTime', e.target.value)}
+                                      style={{ fontSize: '0.8rem', padding: '0.25rem 0.45rem' }}
+                                    />
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>to</span>
+                                    <input
+                                      type="time"
+                                      className="filter-input"
+                                      value={shift.endTime}
+                                      onChange={(e) => handleDoctorShiftChange(dayIdx, sIdx, 'endTime', e.target.value)}
+                                      style={{ fontSize: '0.8rem', padding: '0.25rem 0.45rem' }}
+                                    />
+                                    {dayObj.shifts.length > 1 && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary"
+                                        style={{ fontSize: '0.7rem', padding: '0.15rem 0.4rem', color: 'var(--status-danger)' }}
+                                        onClick={() => handleDoctorRemoveShift(dayIdx, sIdx)}
+                                        title="Remove Shift"
+                                      >
+                                        ✕
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Breaks */}
+                          {Array.isArray(dayObj.breaks) && dayObj.breaks.length > 0 && (
+                            <div style={{ marginTop: '0.35rem' }}>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, marginBottom: '0.35rem' }}>
+                                Scheduled Breaks:
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                {dayObj.breaks.map((brk, bIdx) => (
+                                  <div key={bIdx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                    <input
+                                      type="text"
+                                      className="filter-input"
+                                      value={brk.label || 'Break'}
+                                      placeholder="Break Name"
+                                      onChange={(e) => handleDoctorBreakChange(dayIdx, bIdx, 'label', e.target.value)}
+                                      style={{ fontSize: '0.78rem', padding: '0.25rem 0.45rem', width: '90px' }}
+                                    />
+                                    <input
+                                      type="time"
+                                      className="filter-input"
+                                      value={brk.startTime}
+                                      onChange={(e) => handleDoctorBreakChange(dayIdx, bIdx, 'startTime', e.target.value)}
+                                      style={{ fontSize: '0.8rem', padding: '0.25rem 0.45rem' }}
+                                    />
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>to</span>
+                                    <input
+                                      type="time"
+                                      className="filter-input"
+                                      value={brk.endTime}
+                                      onChange={(e) => handleDoctorBreakChange(dayIdx, bIdx, 'endTime', e.target.value)}
+                                      style={{ fontSize: '0.8rem', padding: '0.25rem 0.45rem' }}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary"
+                                      style={{ fontSize: '0.7rem', padding: '0.15rem 0.4rem', color: 'var(--status-danger)' }}
+                                      onClick={() => handleDoctorRemoveBreak(dayIdx, bIdx)}
+                                      title="Remove Break"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              )}
+
+              {/* Save & Reset Footer */}
+              <div className="admin-schedule-footer-bar">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleDoctorScheduleSave}
+                  disabled={doctorScheduleSaving}
+                >
+                  {doctorScheduleSaving ? 'Saving Schedule...' : '💾 Save Practice Schedule'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={loadDoctorSelfSchedule}
+                  disabled={doctorScheduleSaving}
+                >
+                  ↺ Discard Changes
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1997,62 +3425,191 @@ export default function App() {
       {/* VIEW: My Appointments (Patient) */}
       {viewTab === 'my_appointments' && (
         <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
-          <h2>📅 My Appointments</h2>
-          {selfCheckInMessage && (
-            <div style={{ background: '#090d16', border: '1px solid var(--primary)', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', color: '#6ee7b7', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <div>{selfCheckInMessage}</div>
-              {selfCheckInMessage.includes('Token') && (
-                <button className="btn btn-primary" style={{ fontSize: '0.8rem', padding: '0.25rem 0.6rem' }} onClick={() => setViewTab('live_queue')}>
-                  Go to Live Queue Tracker →
-                </button>
-              )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <div>
+              <h2 style={{ margin: 0 }}>📅 My Appointments</h2>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                Track your upcoming consultations, self-check-in upon arrival, or cancel and rebook slots.
+              </div>
             </div>
-          )}
-          {myAppointments.length === 0 ? (
-            <div className="empty-state">No appointments booked yet.</div>
+            {patientToken && (
+              <button
+                className="btn btn-secondary"
+                style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+                onClick={() => {
+                  setAppointmentMessage(null);
+                  loadMyAppointments();
+                }}
+              >
+                🔄 Refresh Appointments
+              </button>
+            )}
+          </div>
+
+          {!patientToken ? (
+            <div className="empty-state" style={{ padding: '3rem 1.5rem' }}>
+              <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.5rem' }}>
+                Please Sign In to View Your Appointments
+              </div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
+                Access your scheduled consultations, token queue tickets, and appointment history.
+              </div>
+              <button className="btn btn-primary" onClick={() => setShowAuthModal(true)}>
+                Sign In / Register
+              </button>
+            </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {myAppointments.map((appt) => {
-                const slotTime = appt.timeSlot?.startTime || appt.slotTime || '';
-                return (
-                  <div key={appt._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', flexWrap: 'wrap', gap: '0.5rem' }}>
-                    <div>
-                      <div style={{ fontWeight: 'bold', fontSize: '1rem' }}>Dr. {appt.doctorId?.userId?.name || appt.doctorId?.fullName || 'Doctor'}</div>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                        Date: {appt.appointmentDate} | Slot: {slotTime} | Status: <strong style={{ color: appt.status === 'EXPIRED' ? '#ef4444' : 'var(--primary)' }}>{appt.status}</strong>
-                      </div>
-                      {appt.status === 'BOOKED' && (
-                        <div style={{ fontSize: '0.75rem', color: '#38bdf8', marginTop: '0.2rem' }}>
-                          Arrival window: 60 mins before to 30 mins after slot ({slotTime})
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                      {appt.status === 'BOOKED' && (
-                        <>
-                          <button
-                            className="btn btn-primary"
-                            disabled={selfCheckInLoading}
-                            style={{ fontSize: '0.85rem' }}
-                            onClick={() => handleSelfCheckIn(appt._id)}
-                          >
-                            ✓ Check In Now (Get Token)
-                          </button>
-                          <button className="btn btn-danger" style={{ fontSize: '0.85rem' }} onClick={() => handleCancelAppointment(appt._id)}>
-                            Cancel
-                          </button>
-                        </>
-                      )}
-                      {appt.status === 'CHECKED_IN' && (
-                        <button className="btn btn-secondary" style={{ fontSize: '0.85rem' }} onClick={() => setViewTab('live_queue')}>
-                          View Live Queue →
-                        </button>
-                      )}
-                    </div>
+            <>
+              {appointmentMessage && (
+                <div
+                  style={{
+                    background: appointmentMessage.type === 'success' ? '#064e3b' : '#451a03',
+                    border: `1px solid ${appointmentMessage.type === 'success' ? '#10b981' : '#f59e0b'}`,
+                    color: appointmentMessage.type === 'success' ? '#a7f3d0' : '#fef3c7',
+                    padding: '0.75rem 1rem',
+                    borderRadius: '8px',
+                    marginBottom: '1rem',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  {appointmentMessage.text}
+                </div>
+              )}
+
+              {selfCheckInMessage && (
+                <div style={{ background: '#090d16', border: '1px solid var(--primary)', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', color: '#6ee7b7', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div>{selfCheckInMessage}</div>
+                  {selfCheckInMessage.includes('Token') && (
+                    <button className="btn btn-primary" style={{ fontSize: '0.8rem', padding: '0.25rem 0.6rem' }} onClick={() => setViewTab('live_queue')}>
+                      Go to Live Queue Tracker →
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {myAppointments.length === 0 ? (
+                <div className="empty-state" style={{ padding: '3rem 1.5rem' }}>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.35rem' }}>
+                    No Appointments Booked Yet
                   </div>
-                );
-              })}
-            </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
+                    Discover our specialists and reserve consultation slots that suit your schedule.
+                  </div>
+                  <button className="btn btn-primary" onClick={() => setViewTab('discovery')}>
+                    Find a Doctor & Book →
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {myAppointments.map((appt) => {
+                    const slotTime = appt.timeSlot?.startTime
+                      ? `${appt.timeSlot.startTime} - ${appt.timeSlot.endTime}`
+                      : (appt.slotTime || '');
+                    const isCancelling = cancellationLoadingId === appt._id;
+                    const docObj = appt.doctorId || {};
+
+                    return (
+                      <div
+                        key={appt._id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          background: '#090d16',
+                          padding: '1rem 1.25rem',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border)',
+                          flexWrap: 'wrap',
+                          gap: '0.75rem',
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 'bold', fontSize: '1.05rem', color: 'var(--text-main)' }}>
+                            Dr. {docObj.fullName || 'Doctor'}
+                          </div>
+                          <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                            {appt.clinicId?.name || 'Assigned Clinic'} • {appt.specialtyId?.name || 'Specialty'}
+                          </div>
+                          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
+                            📅 <strong>{appt.appointmentDate}</strong> | ⏱️ <strong>{slotTime}</strong> | Status:{' '}
+                            <span
+                              className={`badge ${
+                                appt.status === 'BOOKED'
+                                  ? 'badge-primary'
+                                  : appt.status === 'CHECKED_IN'
+                                  ? 'badge-success'
+                                  : appt.status === 'CANCELLED'
+                                  ? 'badge-secondary'
+                                  : 'badge-warning'
+                              }`}
+                              style={{ marginLeft: '0.35rem' }}
+                            >
+                              {appt.status}
+                            </span>
+                          </div>
+                          {appt.status === 'BOOKED' && (
+                            <div style={{ fontSize: '0.75rem', color: '#38bdf8', marginTop: '0.25rem' }}>
+                              Arrival window: 60 mins before to 30 mins after slot start ({appt.timeSlot?.startTime})
+                            </div>
+                          )}
+                          {appt.status === 'CANCELLED' && appt.cancellationReason && (
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '0.25rem', fontStyle: 'italic' }}>
+                              Reason: {appt.cancellationReason}
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                          {appt.status === 'BOOKED' && (
+                            <>
+                              <button
+                                className="btn btn-primary"
+                                disabled={selfCheckInLoading || isCancelling}
+                                style={{ fontSize: '0.85rem' }}
+                                onClick={() => handleSelfCheckIn(appt._id)}
+                              >
+                                ✓ Check In Now (Get Token)
+                              </button>
+                              <button
+                                className="btn btn-danger"
+                                style={{ fontSize: '0.85rem' }}
+                                disabled={isCancelling || selfCheckInLoading}
+                                onClick={() => handleCancelAppointment(appt._id)}
+                              >
+                                {isCancelling ? 'Cancelling...' : 'Cancel'}
+                              </button>
+                            </>
+                          )}
+                          {appt.status === 'CHECKED_IN' && (
+                            <button className="btn btn-secondary" style={{ fontSize: '0.85rem' }} onClick={() => setViewTab('live_queue')}>
+                              View Live Queue →
+                            </button>
+                          )}
+                          {appt.status === 'CANCELLED' && (
+                            <button
+                              className="btn btn-secondary"
+                              style={{ fontSize: '0.85rem' }}
+                              onClick={() => {
+                                handleProceedToAppointment({
+                                  _id: docObj._id || docObj,
+                                  fullName: docObj.fullName || 'Doctor',
+                                  clinicId: appt.clinicId,
+                                  specialtyId: appt.specialtyId,
+                                  consultationFee: docObj.consultationFee,
+                                  averageConsultationDurationMinutes: docObj.averageConsultationDurationMinutes,
+                                });
+                              }}
+                            >
+                              ↺ Rebook Slot
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -2094,18 +3651,74 @@ export default function App() {
       {/* VIEW: Staff Reception Desk */}
       {viewTab === 'reception' && (
         <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
-          <h2>🏥 Staff Reception Desk — Operational Queue Management</h2>
+          {/* Reception Header & Clinic Context */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span>🏥</span> Staff Reception & Operations Desk
+              </h2>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                Clinic operational queue orchestration, appointment arrival check-in, and walk-in token allocation.
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <div style={{ background: '#090d16', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Clinic: </span>
+                <strong style={{ color: 'var(--primary)' }}>
+                  {authSession?.user?.profile?.clinicId?.name || (doctors[0]?.clinicId?.name) || 'Assigned Clinic'}
+                </strong>
+                <span style={{ margin: '0 0.5rem', color: 'var(--border)' }}>|</span>
+                <span style={{ color: 'var(--text-muted)' }}>Operator: </span>
+                <strong>{authSession?.user?.fullName || 'Staff User'}</strong>
+                <span style={{ marginLeft: '0.35rem', fontSize: '0.75rem', padding: '0.15rem 0.4rem', borderRadius: '4px', background: 'var(--primary)', color: '#fff' }}>
+                  {authSession?.user?.role || 'STAFF'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Operational Metrics Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem', marginBottom: '1.25rem' }}>
+            <div style={{ background: '#090d16', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.75rem', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Waiting</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#38bdf8', marginTop: '0.25rem' }}>{waitingEntries.length}</div>
+            </div>
+            <div style={{ background: '#090d16', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.75rem', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Serving / Called</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#a855f7', marginTop: '0.25rem' }}>{activeEntries.length}</div>
+            </div>
+            <div style={{ background: '#090d16', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.75rem', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Skipped</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#f59e0b', marginTop: '0.25rem' }}>{skippedEntries.length}</div>
+            </div>
+            <div style={{ background: '#090d16', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.75rem', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Terminal / Done</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#10b981', marginTop: '0.25rem' }}>{terminalEntries.length}</div>
+            </div>
+            <div style={{ background: '#090d16', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.75rem', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Today</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#e2e8f0', marginTop: '0.25rem' }}>
+                {waitingEntries.length + activeEntries.length + skippedEntries.length + terminalEntries.length}
+              </div>
+            </div>
+          </div>
+
+          {/* Operational Message */}
           {receptionMessage && (
             <div style={{ background: '#1c1917', border: '1px solid var(--primary)', padding: '0.75rem', borderRadius: '8px', color: 'var(--text-main)', marginBottom: '1rem' }}>
               {receptionMessage}
             </div>
           )}
 
+          {/* Allocated Token Confirmation */}
           {allocatedTokenCard && (
             <div style={{ background: '#064e3b', border: '1px solid var(--success-text)', padding: '1rem', borderRadius: '8px', marginBottom: '1.25rem', textAlign: 'center' }}>
               <h3 style={{ color: '#6ee7b7', margin: 0 }}>✓ QUEUE TOKEN ALLOCATED</h3>
               <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#ffffff', margin: '0.5rem 0' }}>
                 Token #{allocatedTokenCard.tokenNumber}
+              </div>
+              <div style={{ fontSize: '0.85rem', color: '#a7f3d0' }}>
+                Priority: {allocatedTokenCard.priority || 'NORMAL'} | Source: {allocatedTokenCard.source || 'STAFF'}
               </div>
               <button className="btn btn-secondary" style={{ marginTop: '0.75rem', fontSize: '0.8rem' }} onClick={() => setAllocatedTokenCard(null)}>
                 Dismiss
@@ -2113,139 +3726,663 @@ export default function App() {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-            <input
-              type="text"
-              className="filter-input"
-              style={{ flex: 1, minWidth: '220px' }}
-              placeholder="Search patient by name or phone..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            <button className="btn btn-primary" onClick={handleStaffPatientSearch}>
-              Search Patient
+          {/* Reception Sub-Tabs Navigation */}
+          <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className={`btn ${receptionSubTab === 'queue' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ fontSize: '0.85rem' }}
+              onClick={() => setReceptionSubTab('queue')}
+            >
+              📋 Live Queue Operations
+            </button>
+            <button
+              type="button"
+              className={`btn ${receptionSubTab === 'checkin' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ fontSize: '0.85rem' }}
+              onClick={() => {
+                setReceptionSubTab('checkin');
+                loadStaffAppointments();
+              }}
+            >
+              🎫 Appointment Check-In
+            </button>
+            <button
+              type="button"
+              className={`btn ${receptionSubTab === 'walkin' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ fontSize: '0.85rem' }}
+              onClick={() => setReceptionSubTab('walkin')}
+            >
+              🚶 Walk-In Registration
             </button>
           </div>
 
-          {searchResults.length > 0 && (
-            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
-              <h4>Search Results</h4>
-              {searchResults.map((p) => (
-                <div key={p._id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
-                  <div>{p.fullName} ({p.phone})</div>
-                  <button className="btn btn-secondary" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} onClick={() => handleSelectStaffPatient(p)}>
-                    Select for Walk-In
+          {/* ========================================================================= */}
+          {/* SUB-TAB 1: LIVE QUEUE OPERATIONS */}
+          {/* ========================================================================= */}
+          {receptionSubTab === 'queue' && (
+            <div>
+              {/* Doctor Queue Paused Alert */}
+              {doctorQueueStatus?.isQueuePaused && (
+                <div style={{ background: '#451a03', border: '1px solid #f59e0b', color: '#fef3c7', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div>
+                    <strong>⏸ Queue Currently Paused:</strong> {doctorQueueStatus.queuePauseReason || 'Doctor unavailable'}
+                  </div>
+                  <button className="btn btn-primary" style={{ fontSize: '0.8rem', padding: '0.3rem 0.75rem' }} onClick={handleResumeQueue}>
+                    ▶ Resume Queue
                   </button>
                 </div>
-              ))}
+              )}
+
+              {/* Action & Doctor Focus Bar */}
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Doctor Queue:</span>
+                  <select
+                    className="filter-input"
+                    style={{ minWidth: '180px' }}
+                    value={receptionDoctorId}
+                    onChange={(e) => setReceptionDoctorId(e.target.value)}
+                  >
+                    {doctors.map((d) => (
+                      <option key={d._id} value={d._id}>Dr. {d.fullName} ({d.specialtyId?.name || 'Doctor'})</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button className="btn btn-primary" disabled={opLoading || !receptionDoctorId} onClick={handleCallNext}>
+                    📢 Call Next Patient
+                  </button>
+                  <button className="btn btn-secondary" disabled={opLoading || !receptionDoctorId} onClick={handlePauseQueue}>
+                    ⏸ Pause Queue
+                  </button>
+                  <button className="btn btn-secondary" disabled={opLoading || !receptionDoctorId} onClick={handleResumeQueue}>
+                    ▶ Resume Queue
+                  </button>
+                  <button className="btn btn-secondary" onClick={loadTodayStaffQueue}>
+                    🔄 Refresh Queue
+                  </button>
+                </div>
+              </div>
+
+              {/* Queue Columns: Serving & Waiting */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+                {/* Active Serving Card */}
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <h4 style={{ margin: 0 }}>Currently Serving ({activeEntries.length})</h4>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Doctor consultation in Cockpit</span>
+                  </div>
+                  {activeEntries.length === 0 ? (
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '1rem 0', textAlign: 'center' }}>
+                      No active patient called. Use "Call Next Patient" to advance the queue.
+                    </div>
+                  ) : (
+                    activeEntries.map((entry) => (
+                      <div key={entry._id} style={{ padding: '0.75rem', background: '#0d1322', borderRadius: '6px', border: '1px solid var(--border)', marginBottom: '0.5rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: 'bold', color: 'var(--primary)', fontSize: '1.05rem' }}>
+                            Token #{entry.tokenNumber}
+                          </span>
+                          <span style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem', borderRadius: '4px', background: entry.status === 'IN_CONSULTATION' ? '#10b981' : '#38bdf8', color: '#fff' }}>
+                            {entry.status}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.9rem', fontWeight: 600, marginTop: '0.35rem' }}>
+                          {entry.patientId?.fullName || 'Patient'}
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                          Phone: {entry.patientId?.phone || 'N/A'} | Doctor: Dr. {entry.doctorId?.fullName || 'Doctor'}
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.65rem', flexWrap: 'wrap' }}>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                            onClick={() => handleSkip(entry._id)}
+                            title="Skip patient if absent when called"
+                          >
+                            ⏭ Skip Patient
+                          </button>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                            onClick={() => handleNoShow(entry._id)}
+                            title="Mark patient as No-Show"
+                          >
+                            🚫 Mark No-Show
+                          </button>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', color: '#ef4444' }}
+                            onClick={() => handleStaffCancelQueueEntry(entry._id)}
+                            title="Cancel queue entry with reason"
+                          >
+                            ❌ Cancel Entry
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Waiting Queue List */}
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <h4 style={{ margin: 0 }}>Waiting in Queue ({waitingEntries.length})</h4>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Hybrid Priority Sort</span>
+                  </div>
+                  {waitingEntries.length === 0 ? (
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '1rem 0', textAlign: 'center' }}>
+                      No patients currently waiting in line.
+                    </div>
+                  ) : (
+                    waitingEntries.map((entry) => (
+                      <div key={entry._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: '0.4rem' }}>
+                        <div>
+                          <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>
+                            Token #{entry.tokenNumber} — {entry.patientId?.fullName || 'Patient'}
+                            {entry.priority && entry.priority !== 'NORMAL' && (
+                              <span style={{ marginLeft: '0.4rem', fontSize: '0.7rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: entry.priority === 'EMERGENCY' ? '#dc2626' : '#d97706', color: '#fff' }}>
+                                {entry.priority}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            Source: {entry.source} | Phone: {entry.patientId?.phone || 'N/A'} {entry.triageReason ? `| Triage: ${entry.triageReason}` : ''}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.3rem' }}>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.7rem', padding: '0.2rem 0.45rem', color: '#f59e0b' }}
+                            onClick={() => handleOpenTriage(entry)}
+                            title="Escalate queue priority"
+                          >
+                            ⚡ Triage
+                          </button>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.7rem', padding: '0.2rem 0.45rem', color: '#38bdf8' }}
+                            onClick={() => handleOpenTransfer(entry)}
+                            title="Transfer patient to another doctor"
+                          >
+                            🔀 Transfer
+                          </button>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.7rem', padding: '0.2rem 0.45rem', color: '#ef4444' }}
+                            onClick={() => handleStaffCancelQueueEntry(entry._id)}
+                            title="Cancel queue entry"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Skipped Patients Recovery Card */}
+              {skippedEntries.length > 0 && (
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.5rem' }}>
+                  <h4 style={{ margin: '0 0 0.5rem 0', color: '#f59e0b' }}>
+                    ⏭ Skipped Patients ({skippedEntries.length}) — Ready to Rejoin
+                  </h4>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                    Patients who were absent when called can be rejoined to the waiting queue with a newly allocated token.
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0.75rem' }}>
+                    {skippedEntries.map((entry) => (
+                      <div key={entry._id} style={{ background: '#0d1322', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontWeight: 'bold' }}>Token #{entry.tokenNumber} — {entry.patientId?.fullName || 'Patient'}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{entry.skipReason || 'Skipped'}</div>
+                        </div>
+                        <button
+                          className="btn btn-primary"
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                          onClick={() => handleStaffRejoinSkipped(entry._id)}
+                          disabled={opLoading}
+                        >
+                          🔁 Rejoin Queue
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Terminal Queue History for Today */}
+              {terminalEntries.length > 0 && (
+                <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-muted)' }}>
+                    🏁 Terminal Queue Entries Today ({terminalEntries.length})
+                  </h4>
+                  <div style={{ maxHeight: '180px', overflowY: 'auto', fontSize: '0.8rem' }}>
+                    {terminalEntries.map((entry) => (
+                      <div key={entry._id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', borderBottom: '1px solid var(--border)' }}>
+                        <span>Token #{entry.tokenNumber} — {entry.patientId?.fullName || 'Patient'}</span>
+                        <span style={{
+                          padding: '0.1rem 0.35rem',
+                          borderRadius: '4px',
+                          fontSize: '0.75rem',
+                          background: entry.status === 'COMPLETED' ? '#064e3b' : '#334155',
+                          color: entry.status === 'COMPLETED' ? '#6ee7b7' : '#94a3b8'
+                        }}>
+                          {entry.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {selectedStaffPatient && (
-            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem', border: '1px solid var(--primary)' }}>
-              <h4>Selected Patient: {selectedStaffPatient.fullName} ({selectedStaffPatient.phone})</h4>
-              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <select className="filter-input" value={receptionDoctorId} onChange={(e) => setReceptionDoctorId(e.target.value)}>
-                  {doctors.map((d) => (
-                    <option key={d._id} value={d._id}>Dr. {d.fullName}</option>
-                  ))}
-                </select>
-                <button className="btn btn-primary" onClick={handleRegisterWalkInQueue}>
-                  Register Walk-In & Allocate Token
+          {/* ========================================================================= */}
+          {/* SUB-TAB 2: APPOINTMENT CHECK-IN */}
+          {/* ========================================================================= */}
+          {receptionSubTab === 'checkin' && (
+            <div>
+              {/* Check-In Header & Instructions */}
+              <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.25rem' }}>
+                <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '1.1rem' }}>🎫 Clinic Appointment Arrival & Check-In</h3>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Locate booked clinic appointments and check in patients upon clinic arrival. A live queue token is generated and allocated upon check-in.
+                </p>
+              </div>
+
+              {/* Filter & Search Bar */}
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Date:</label>
+                  <input
+                    type="date"
+                    className="filter-input"
+                    value={staffApptDate}
+                    onChange={(e) => {
+                      setStaffApptDate(e.target.value);
+                      loadStaffAppointments(e.target.value, staffApptStatus);
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Status:</label>
+                  <select
+                    className="filter-input"
+                    value={staffApptStatus}
+                    onChange={(e) => {
+                      setStaffApptStatus(e.target.value);
+                      loadStaffAppointments(staffApptDate, e.target.value);
+                    }}
+                  >
+                    <option value="BOOKED">BOOKED (Awaiting Arrival)</option>
+                    <option value="CHECKED_IN">CHECKED_IN (Already in Queue)</option>
+                    <option value="ALL">ALL Statuses</option>
+                  </select>
+                </div>
+                <div style={{ flex: 1, minWidth: '220px' }}>
+                  <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Filter Patient:</label>
+                  <input
+                    type="text"
+                    className="filter-input"
+                    style={{ width: '100%' }}
+                    placeholder="Search by patient name or phone..."
+                    value={staffApptSearch}
+                    onChange={(e) => setStaffApptSearch(e.target.value)}
+                  />
+                </div>
+                <div style={{ alignSelf: 'flex-end' }}>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => loadStaffAppointments()}
+                    disabled={staffApptLoading}
+                  >
+                    {staffApptLoading ? 'Refreshing...' : '🔄 Refresh Appointments'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Error Message */}
+              {staffApptError && (
+                <div style={{ background: '#451a03', border: '1px solid #f59e0b', color: '#fef3c7', padding: '0.75rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                  {staffApptError}
+                </div>
+              )}
+
+              {/* Appointments List */}
+              {staffApptLoading ? (
+                <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  Loading clinic appointments...
+                </div>
+              ) : (() => {
+                const filtered = staffAppointments.filter((appt) => {
+                  if (!staffApptSearch.trim()) return true;
+                  const q = staffApptSearch.toLowerCase();
+                  const nameMatch = appt.patientId?.fullName?.toLowerCase().includes(q);
+                  const phoneMatch = appt.patientId?.phone?.includes(q);
+                  const docMatch = appt.doctorId?.fullName?.toLowerCase().includes(q);
+                  return nameMatch || phoneMatch || docMatch;
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div style={{ background: '#090d16', padding: '2.5rem', borderRadius: '8px', border: '1px solid var(--border)', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      No appointments matching the selected date and status filters.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: '1rem' }}>
+                    {filtered.map((appt) => {
+                      const isBooked = appt.status === 'BOOKED';
+                      const isCheckedIn = appt.status === 'CHECKED_IN';
+                      const isCancelled = appt.status === 'CANCELLED';
+                      return (
+                        <div
+                          key={appt._id}
+                          style={{
+                            background: '#090d16',
+                            border: `1px solid ${isCheckedIn ? '#10b981' : isBooked ? 'var(--primary)' : 'var(--border)'}`,
+                            borderRadius: '8px',
+                            padding: '1rem',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                          }}
+                        >
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                              <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#38bdf8' }}>
+                                ⏰ {appt.timeSlot?.startTime || '00:00'} – {appt.timeSlot?.endTime || '00:00'}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: '0.72rem',
+                                  padding: '0.15rem 0.4rem',
+                                  borderRadius: '4px',
+                                  background: isCheckedIn ? '#064e3b' : isBooked ? '#1e3a8a' : '#334155',
+                                  color: isCheckedIn ? '#6ee7b7' : isBooked ? '#93c5fd' : '#cbd5e1',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {appt.status}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.2rem' }}>
+                              {appt.patientId?.fullName || 'Patient'}
+                            </div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
+                              Phone: {appt.patientId?.phone || 'N/A'} {appt.patientId?.gender ? `(${appt.patientId.gender})` : ''}
+                            </div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: '0.4rem' }}>
+                              Doctor: <strong>Dr. {appt.doctorId?.fullName || 'Doctor'}</strong> ({appt.specialtyId?.name || 'Specialty'})
+                            </div>
+                          </div>
+
+                          <div style={{ marginTop: '1rem' }}>
+                            {isBooked && (
+                              <button
+                                className="btn btn-primary"
+                                style={{ width: '100%', fontSize: '0.85rem', padding: '0.45rem' }}
+                                disabled={checkInLoadingId === appt._id}
+                                onClick={() => handleStaffCheckIn(appt._id)}
+                              >
+                                {checkInLoadingId === appt._id ? 'Checking In...' : '🎫 Check In Patient & Allocate Token'}
+                              </button>
+                            )}
+                            {isCheckedIn && (
+                              <div style={{ textAlign: 'center', fontSize: '0.8rem', color: '#10b981', fontWeight: 600, padding: '0.35rem', background: '#064e3b', borderRadius: '4px' }}>
+                                ✓ Patient Checked In (In Queue)
+                              </div>
+                            )}
+                            {isCancelled && (
+                              <div style={{ textAlign: 'center', fontSize: '0.8rem', color: '#ef4444', padding: '0.35rem', background: '#450a0a', borderRadius: '4px' }}>
+                                Cancelled: {appt.cancellationReason || 'No reason provided'}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* SUB-TAB 3: WALK-IN REGISTRATION */}
+          {/* ========================================================================= */}
+          {receptionSubTab === 'walkin' && (
+            <div>
+              <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.25rem' }}>
+                <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '1.1rem' }}>🚶 Walk-In Patient Registration</h3>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  Search for an existing registered patient or create a new walk-in profile, then allocate a queue token directly.
+                </p>
+              </div>
+
+              {/* Mode Toggle: Existing vs New */}
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                <button
+                  type="button"
+                  className={`btn ${!isCreatingNewPatient ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: '0.85rem' }}
+                  onClick={() => setIsCreatingNewPatient(false)}
+                >
+                  🔍 Search Existing Patient
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${isCreatingNewPatient ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: '0.85rem' }}
+                  onClick={() => setIsCreatingNewPatient(true)}
+                >
+                  ➕ Register New Patient Profile
                 </button>
               </div>
+
+              {/* Mode A: Search Existing Patient */}
+              {!isCreatingNewPatient && (
+                <div style={{ background: '#090d16', padding: '1.25rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.25rem' }}>
+                  <h4 style={{ margin: '0 0 0.75rem 0' }}>Search Registered Patients</h4>
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <input
+                      type="text"
+                      className="filter-input"
+                      style={{ flex: 1, minWidth: '220px' }}
+                      placeholder="Enter 10-digit phone or patient full name..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleStaffPatientSearch()}
+                    />
+                    <button className="btn btn-primary" onClick={handleStaffPatientSearch}>
+                      Search Patient
+                    </button>
+                  </div>
+
+                  {searchResults.length > 0 && (
+                    <div style={{ marginTop: '1rem' }}>
+                      <h5 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-muted)' }}>Matching Results ({searchResults.length})</h5>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        {searchResults.map((p) => (
+                          <div
+                            key={p._id}
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              padding: '0.6rem 0.8rem',
+                              background: '#0d1322',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border)',
+                            }}
+                          >
+                            <div>
+                              <strong style={{ color: 'var(--text-main)' }}>{p.fullName}</strong>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginLeft: '0.5rem' }}>
+                                Phone: {p.phone} | Gender: {p.gender || 'N/A'}
+                              </span>
+                            </div>
+                            <button
+                              className="btn btn-secondary"
+                              style={{ padding: '0.25rem 0.65rem', fontSize: '0.75rem' }}
+                              onClick={() => handleSelectStaffPatient(p)}
+                            >
+                              Select for Walk-In
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Mode B: Register New Patient Profile */}
+              {isCreatingNewPatient && (
+                <form
+                  onSubmit={handleCreateWalkInPatient}
+                  style={{
+                    background: '#090d16',
+                    padding: '1.25rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border)',
+                    marginBottom: '1.25rem',
+                    maxWidth: '600px',
+                  }}
+                >
+                  <h4 style={{ margin: '0 0 0.75rem 0' }}>Register New Walk-In Patient Profile</h4>
+
+                  {newPatientError && (
+                    <div style={{ background: '#451a03', border: '1px solid #f59e0b', color: '#fef3c7', padding: '0.6rem', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                      {newPatientError}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem' }}>Full Name *</label>
+                      <input
+                        type="text"
+                        className="filter-input"
+                        style={{ width: '100%' }}
+                        placeholder="e.g. Ramesh Patel"
+                        value={newPatientForm.fullName}
+                        onChange={(e) => setNewPatientForm({ ...newPatientForm, fullName: e.target.value })}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem' }}>10-Digit Phone *</label>
+                      <input
+                        type="tel"
+                        className="filter-input"
+                        style={{ width: '100%' }}
+                        placeholder="e.g. 9876543210"
+                        value={newPatientForm.phone}
+                        onChange={(e) => setNewPatientForm({ ...newPatientForm, phone: e.target.value })}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem' }}>Gender *</label>
+                      <select
+                        className="filter-input"
+                        style={{ width: '100%' }}
+                        value={newPatientForm.gender}
+                        onChange={(e) => setNewPatientForm({ ...newPatientForm, gender: e.target.value })}
+                      >
+                        <option value="MALE">MALE</option>
+                        <option value="FEMALE">FEMALE</option>
+                        <option value="OTHER">OTHER</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem' }}>Date of Birth *</label>
+                      <input
+                        type="date"
+                        className="filter-input"
+                        style={{ width: '100%' }}
+                        value={newPatientForm.dateOfBirth}
+                        onChange={(e) => setNewPatientForm({ ...newPatientForm, dateOfBirth: e.target.value })}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: '1rem' }}>
+                    <label style={{ display: 'block', fontSize: '0.75rem', marginBottom: '0.25rem' }}>Street Address / Area</label>
+                    <input
+                      type="text"
+                      className="filter-input"
+                      style={{ width: '100%' }}
+                      placeholder="e.g. MG Road, Indiranagar"
+                      value={newPatientForm.address}
+                      onChange={(e) => setNewPatientForm({ ...newPatientForm, address: e.target.value })}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={newPatientCreating}
+                    style={{ fontSize: '0.85rem' }}
+                  >
+                    {newPatientCreating ? 'Creating Profile...' : '➕ Create Patient Profile'}
+                  </button>
+                </form>
+              )}
+
+              {/* Selected Patient & Token Allocation Card */}
+              {selectedStaffPatient && (
+                <div style={{ background: '#090d16', padding: '1.25rem', borderRadius: '8px', border: '1px solid var(--primary)', marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <h4 style={{ margin: 0, color: '#38bdf8' }}>
+                      Selected Patient: {selectedStaffPatient.fullName}
+                    </h4>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                      onClick={() => setSelectedStaffPatient(null)}
+                    >
+                      Clear / Change
+                    </button>
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+                    Phone: {selectedStaffPatient.phone} | Gender: {selectedStaffPatient.gender || 'N/A'} | DOB: {selectedStaffPatient.dateOfBirth?.split('T')[0] || selectedStaffPatient.dateOfBirth || 'N/A'}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: '220px' }}>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>Assign Doctor:</label>
+                      <select
+                        className="filter-input"
+                        style={{ width: '100%' }}
+                        value={receptionDoctorId}
+                        onChange={(e) => setReceptionDoctorId(e.target.value)}
+                      >
+                        {doctors.map((d) => (
+                          <option key={d._id} value={d._id}>Dr. {d.fullName} ({d.specialtyId?.name || 'Doctor'})</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{ alignSelf: 'flex-end' }}>
+                      <button className="btn btn-primary" onClick={handleRegisterWalkInQueue} disabled={!receptionDoctorId}>
+                        🚶 Register Walk-In & Allocate Token
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
-
-          {/* Queue Overview & Action Buttons */}
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-            <button className="btn btn-primary" disabled={opLoading} onClick={handleCallNext}>
-              📢 Call Next Patient
-            </button>
-            <button className="btn btn-secondary" onClick={handlePauseQueue}>
-              ⏸ Pause Queue
-            </button>
-            <button className="btn btn-secondary" onClick={handleResumeQueue}>
-              ▶ Resume Queue
-            </button>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
-            {/* Active Serving Card */}
-            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <h4>Currently Serving ({activeEntries.length})</h4>
-              {activeEntries.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No active patient called.</div>
-              ) : (
-                activeEntries.map((entry) => (
-                  <div key={entry._id} style={{ padding: '0.5rem 0', borderBottom: '1px solid var(--border)' }}>
-                    <div style={{ fontWeight: 'bold', color: 'var(--primary)' }}>Token #{entry.tokenNumber} ({entry.status})</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{entry.patientId?.fullName || 'Patient'}</div>
-                    <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem' }}>
-                      {entry.status === 'CALLED' && (
-                        <button className="btn btn-primary" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => handleStartConsultation(entry._id)}>
-                          Start
-                        </button>
-                      )}
-                      {entry.status === 'IN_CONSULTATION' && (
-                        <button className="btn btn-primary" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => handleCompleteConsultation(entry._id)}>
-                          Complete
-                        </button>
-                      )}
-                      <button className="btn btn-secondary" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => handleSkip(entry._id)}>
-                        Skip
-                      </button>
-                      <button className="btn btn-secondary" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => handleNoShow(entry._id)}>
-                        No-Show
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {/* Waiting Queue List */}
-            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <h4>Waiting in Queue ({waitingEntries.length})</h4>
-              {waitingEntries.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No patients waiting.</div>
-              ) : (
-                waitingEntries.map((entry) => (
-                  <div key={entry._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: '0.4rem' }}>
-                    <div>
-                      <div style={{ fontWeight: '600' }}>
-                        Token #{entry.tokenNumber} - {entry.patientId?.fullName || 'Patient'}
-                        {entry.priority && entry.priority !== 'NORMAL' && (
-                          <span style={{ marginLeft: '0.4rem', fontSize: '0.7rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: entry.priority === 'EMERGENCY' ? '#dc2626' : '#d97706', color: '#fff' }}>
-                            {entry.priority}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        {entry.source} {entry.triageReason ? `| Triage: ${entry.triageReason}` : ''}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.3rem' }}>
-                      <button
-                        className="btn btn-secondary"
-                        style={{ fontSize: '0.7rem', padding: '0.2rem 0.45rem', color: '#f59e0b' }}
-                        onClick={() => handleOpenTriage(entry)}
-                      >
-                        ⚡ Triage
-                      </button>
-                      <button
-                        className="btn btn-secondary"
-                        style={{ fontSize: '0.7rem', padding: '0.2rem 0.45rem', color: '#38bdf8' }}
-                        onClick={() => handleOpenTransfer(entry)}
-                      >
-                        🔀 Transfer
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
 
           {/* Phase 14 Triage Modal */}
           {triageModalEntry && (
@@ -2712,7 +4849,7 @@ export default function App() {
                 Configure clinic operational policies, inspect immutable queue audit logs, and review financial reconciliations.
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               <button
                 className={`btn ${adminSubTab === 'policy' ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ fontSize: '0.85rem' }}
@@ -2733,6 +4870,23 @@ export default function App() {
                 onClick={() => setAdminSubTab('financial_audit')}
               >
                 💰 Financial Audit
+              </button>
+              <button
+                className={`btn ${adminSubTab === 'schedules' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: '0.85rem' }}
+                onClick={() => setAdminSubTab('schedules')}
+              >
+                📅 Doctor Schedules
+              </button>
+              <button
+                className={`btn ${adminSubTab === 'roster' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: '0.85rem' }}
+                onClick={() => {
+                  setAdminSubTab('roster');
+                  loadAdminRosterData();
+                }}
+              >
+                👥 Roster & Setup Health
               </button>
             </div>
           </div>
@@ -2755,6 +4909,8 @@ export default function App() {
                 if (adminSubTab === 'policy') loadClinicPolicy(governanceClinicId);
                 if (adminSubTab === 'queue_audit') loadQueueAuditLogs(1);
                 if (adminSubTab === 'financial_audit') loadFinancialAuditLogs(1);
+                if (adminSubTab === 'schedules') loadAdminDoctors();
+                if (adminSubTab === 'roster') loadAdminRosterData();
               }}
             >
               🔄 Refresh Data
@@ -2973,6 +5129,451 @@ export default function App() {
             </div>
           )}
 
+          {/* SUB-TAB 4: Doctor Schedule & Consultation Management */}
+          {adminSubTab === 'schedules' && (
+            <div style={{ background: '#090d16', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                  <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '1.15rem' }}>📅 Doctor Schedules & Consultation Duration Management</h3>
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    Inspect and configure weekly recurring working days, shift intervals, breaks, and consultation slot durations across all clinic doctors.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Doctors: <strong>{adminDoctors.length}</strong> ({adminDoctors.filter((d) => d.hasSchedule).length} configured, {adminDoctors.filter((d) => !d.hasSchedule).length} unconfigured)
+                  </span>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }}
+                    onClick={loadAdminDoctors}
+                    disabled={adminDoctorsLoading}
+                  >
+                    {adminDoctorsLoading ? 'Refreshing...' : '🔄 Refresh Roster'}
+                  </button>
+                </div>
+              </div>
+
+              {adminDoctorsError && (
+                <div style={{ background: '#451a03', border: '1px solid #f59e0b', color: '#fef3c7', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                  ⚠️ {adminDoctorsError}
+                </div>
+              )}
+
+              <div className="admin-schedules-grid">
+                {/* Left Panel: Doctor Roster */}
+                <div className="admin-schedules-sidebar">
+                  <div style={{ marginBottom: '0.75rem' }}>
+                    <input
+                      type="text"
+                      className="filter-input"
+                      placeholder="Search doctor, clinic, specialty..."
+                      value={adminDoctorSearch}
+                      onChange={(e) => setAdminDoctorSearch(e.target.value)}
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '0.45rem 0.75rem' }}
+                    />
+                  </div>
+
+                  {/* Filter Pills */}
+                  <div style={{ display: 'flex', gap: '0.35rem', marginBottom: '0.75rem' }}>
+                    <button
+                      type="button"
+                      className={`btn btn-xs ${adminScheduleFilter === 'ALL' ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                      onClick={() => setAdminScheduleFilter('ALL')}
+                    >
+                      All ({adminDoctors.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-xs ${adminScheduleFilter === 'CONFIGURED' ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                      onClick={() => setAdminScheduleFilter('CONFIGURED')}
+                    >
+                      Configured ({adminDoctors.filter((d) => d.hasSchedule).length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn-xs ${adminScheduleFilter === 'UNCONFIGURED' ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+                      onClick={() => setAdminScheduleFilter('UNCONFIGURED')}
+                    >
+                      Unconfigured ({adminDoctors.filter((d) => !d.hasSchedule).length})
+                    </button>
+                  </div>
+
+                  {/* Doctor List */}
+                  {adminDoctorsLoading && adminDoctors.length === 0 ? (
+                    <div className="empty-state" style={{ padding: '2rem 1rem' }}>Loading doctors...</div>
+                  ) : filteredAdminDoctors.length === 0 ? (
+                    <div className="empty-state" style={{ padding: '2rem 1rem' }}>No doctors found matching filters.</div>
+                  ) : (
+                    <div className="admin-doctor-roster-list">
+                      {filteredAdminDoctors.map((doc) => {
+                        const isSelected = selectedAdminDoctor?._id === doc._id;
+                        const isClinicActive = doc.clinicId?.isActive !== false;
+                        const isDoctorActive = doc.isActive !== false;
+
+                        return (
+                          <div
+                            key={doc._id}
+                            className={`admin-doctor-roster-item ${isSelected ? 'selected' : ''}`}
+                            onClick={() => initScheduleForDoctor(doc)}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.25rem' }}>
+                              <div style={{ fontWeight: 600, fontSize: '0.9rem', color: isSelected ? 'var(--primary-light)' : 'var(--text-main)' }}>
+                                Dr. {doc.fullName}
+                              </div>
+                              <div style={{ display: 'flex', gap: '0.25rem' }}>
+                                {!isDoctorActive && (
+                                  <span className="badge badge-danger" style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}>
+                                    Inactive Doc
+                                  </span>
+                                )}
+                                {!isClinicActive && (
+                                  <span className="badge badge-warning" style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}>
+                                    Clinic Inactive
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+                              {doc.specialtyId?.name || 'Specialist'} • <strong>{doc.clinicId?.name || 'Clinic'}</strong>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', marginTop: '0.35rem' }}>
+                              {doc.hasSchedule && doc.workingDays?.length > 0 ? (
+                                <span style={{ color: 'var(--status-success)', fontWeight: 500 }}>
+                                  🗓️ {formatWorkingDays(doc.workingDays)}
+                                </span>
+                              ) : (
+                                <span style={{ color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                                  ⚠️ Not Configured
+                                </span>
+                              )}
+                              <span style={{ color: 'var(--text-muted)' }}>
+                                ⏱️ {doc.averageConsultationDurationMinutes || 15}m
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Right Panel: Schedule Editor */}
+                <div className="admin-schedules-editor">
+                  {!selectedAdminDoctor ? (
+                    <div className="empty-state" style={{ padding: '4rem 2rem' }}>
+                      Select a doctor from the roster on the left to inspect or configure their weekly schedule.
+                    </div>
+                  ) : (
+                    <div>
+                      {/* Doctor Overview Banner */}
+                      <div className="admin-doc-editor-header">
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <h4 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--text-main)' }}>
+                              Dr. {selectedAdminDoctor.fullName}
+                            </h4>
+                            <span className="badge badge-primary" style={{ fontSize: '0.72rem' }}>
+                              {selectedAdminDoctor.specialtyId?.name || 'General'}
+                            </span>
+                            {selectedAdminDoctor.isActive !== false ? (
+                              <span className="badge badge-success" style={{ fontSize: '0.72rem' }}>Doctor Active</span>
+                            ) : (
+                              <span className="badge badge-danger" style={{ fontSize: '0.72rem' }}>Doctor Inactive</span>
+                            )}
+                            {selectedAdminDoctor.clinicId?.isActive !== false ? (
+                              <span className="badge badge-success" style={{ fontSize: '0.72rem' }}>Clinic Active</span>
+                            ) : (
+                              <span className="badge badge-warning" style={{ fontSize: '0.72rem' }}>Clinic Inactive</span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                            Clinic: <strong>{selectedAdminDoctor.clinicId?.name || 'N/A'}</strong> ({selectedAdminDoctor.clinicId?.city || 'City'}) • Fee: ₹{selectedAdminDoctor.consultationFee || 0}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>
+                              Consultation Duration
+                            </label>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                              <input
+                                type="number"
+                                min="1"
+                                max="240"
+                                className="filter-input"
+                                value={scheduleDuration}
+                                onChange={(e) => setScheduleDuration(e.target.value)}
+                                style={{ width: '80px', textAlign: 'center', padding: '0.3rem 0.5rem', fontWeight: 600 }}
+                              />
+                              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>min</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Warnings if Doctor or Clinic Inactive */}
+                      {selectedAdminDoctor.clinicId?.isActive === false && (
+                        <div style={{ background: '#451a03', border: '1px solid #f59e0b', color: '#fef3c7', padding: '0.65rem 0.85rem', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.8rem' }}>
+                          ⚠️ <strong>Notice:</strong> The associated clinic <em>{selectedAdminDoctor.clinicId?.name}</em> is marked INACTIVE. Schedule changes will be saved to the database, but patients cannot book appointments while the clinic is inactive.
+                        </div>
+                      )}
+                      {selectedAdminDoctor.isActive === false && (
+                        <div style={{ background: '#450a0a', border: '1px solid #ef4444', color: '#fee2e2', padding: '0.65rem 0.85rem', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.8rem' }}>
+                          ⚠️ <strong>Notice:</strong> This doctor record is marked INACTIVE. The doctor will not appear in patient discovery searches until activated.
+                        </div>
+                      )}
+
+                      {/* Quick Schedule Helpers */}
+                      <div className="admin-schedule-presets-bar">
+                        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                          Quick Presets:
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                          onClick={handleApplyMonToFriPreset}
+                          title="Set Mon-Fri 09:00-13:00 and 16:00-20:00"
+                        >
+                          ⚡ Mon–Fri (Two Shifts: 9-1, 4-8)
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                          onClick={handleApplySingleShiftPreset}
+                          title="Set Mon-Sat 09:00-17:00 with 1h Lunch Break"
+                        >
+                          ⚡ Mon–Sat (9-5 + Lunch)
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', color: 'var(--status-danger)' }}
+                          onClick={handleMarkAllOffDuty}
+                          title="Set all days to off-duty"
+                        >
+                          🚫 Mark All Off-Duty
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                          onClick={handleResetSchedule}
+                          title="Discard unsaved changes and reload doctor's schedule"
+                        >
+                          ↺ Reset Changes
+                        </button>
+                      </div>
+
+                      {/* 7-Day Schedule Editor List */}
+                      <div className="admin-schedule-days-list">
+                        {scheduleWeeklyHours.map((dayObj, dayIdx) => (
+                          <div
+                            key={dayObj.dayOfWeek}
+                            className={`admin-schedule-day-card ${dayObj.isWorkingDay ? 'day-active' : 'day-inactive'}`}
+                          >
+                            <div className="day-card-header">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                                <label className="day-toggle-label">
+                                  <input
+                                    type="checkbox"
+                                    checked={dayObj.isWorkingDay}
+                                    onChange={() => handleToggleWorkingDay(dayIdx)}
+                                    style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--primary)' }}
+                                  />
+                                  <span style={{ fontWeight: 700, fontSize: '0.9rem', color: dayObj.isWorkingDay ? 'var(--text-main)' : 'var(--text-muted)' }}>
+                                    {dayObj.dayOfWeek}
+                                  </span>
+                                </label>
+                                {dayObj.isWorkingDay ? (
+                                  <span className="badge badge-success" style={{ fontSize: '0.68rem', padding: '0.1rem 0.4rem' }}>
+                                    Working ({dayObj.shifts?.length || 0} shift{dayObj.shifts?.length === 1 ? '' : 's'})
+                                  </span>
+                                ) : (
+                                  <span className="badge badge-secondary" style={{ fontSize: '0.68rem', padding: '0.1rem 0.4rem', opacity: 0.7 }}>
+                                    Off-Duty
+                                  </span>
+                                )}
+                              </div>
+                              {dayObj.isWorkingDay && (
+                                <div style={{ display: 'flex', gap: '0.4rem' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    style={{ fontSize: '0.72rem', padding: '0.2rem 0.45rem' }}
+                                    onClick={() => handleAddShift(dayIdx)}
+                                  >
+                                    + Add Shift
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    style={{ fontSize: '0.72rem', padding: '0.2rem 0.45rem' }}
+                                    onClick={() => handleAddBreak(dayIdx)}
+                                  >
+                                    + Add Break
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {dayObj.isWorkingDay ? (
+                              <div className="day-card-body">
+                                {/* Shifts */}
+                                <div style={{ marginBottom: dayObj.breaks?.length > 0 ? '0.75rem' : '0' }}>
+                                  <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                                    Working Shifts:
+                                  </div>
+                                  {(!dayObj.shifts || dayObj.shifts.length === 0) ? (
+                                    <div style={{ color: 'var(--status-danger)', fontSize: '0.78rem', fontStyle: 'italic', marginBottom: '0.35rem' }}>
+                                      ⚠️ At least one shift is required for working days. Click "+ Add Shift".
+                                    </div>
+                                  ) : (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                      {dayObj.shifts.map((shift, sIdx) => (
+                                        <div key={sIdx} className="shift-interval-row">
+                                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', width: '55px' }}>
+                                            Shift {sIdx + 1}:
+                                          </span>
+                                          <input
+                                            type="time"
+                                            className="filter-input time-input"
+                                            value={shift.startTime}
+                                            onChange={(e) => handleShiftChange(dayIdx, sIdx, 'startTime', e.target.value)}
+                                            required
+                                          />
+                                          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>to</span>
+                                          <input
+                                            type="time"
+                                            className="filter-input time-input"
+                                            value={shift.endTime}
+                                            onChange={(e) => handleShiftChange(dayIdx, sIdx, 'endTime', e.target.value)}
+                                            required
+                                          />
+                                          <button
+                                            type="button"
+                                            className="btn btn-danger-subtle"
+                                            style={{ fontSize: '0.7rem', padding: '0.2rem 0.45rem' }}
+                                            onClick={() => handleRemoveShift(dayIdx, sIdx)}
+                                            title="Remove Shift"
+                                          >
+                                            ✕ Remove
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Breaks */}
+                                {dayObj.breaks && dayObj.breaks.length > 0 && (
+                                  <div>
+                                    <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                                      Breaks:
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                      {dayObj.breaks.map((brk, bIdx) => (
+                                        <div key={bIdx} className="break-interval-row">
+                                          <input
+                                            type="text"
+                                            className="filter-input"
+                                            placeholder="Label (e.g. Lunch)"
+                                            value={brk.label || ''}
+                                            onChange={(e) => handleBreakChange(dayIdx, bIdx, 'label', e.target.value)}
+                                            style={{ width: '110px', fontSize: '0.78rem', padding: '0.25rem 0.45rem' }}
+                                          />
+                                          <input
+                                            type="time"
+                                            className="filter-input time-input"
+                                            value={brk.startTime}
+                                            onChange={(e) => handleBreakChange(dayIdx, bIdx, 'startTime', e.target.value)}
+                                            required
+                                          />
+                                          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>to</span>
+                                          <input
+                                            type="time"
+                                            className="filter-input time-input"
+                                            value={brk.endTime}
+                                            onChange={(e) => handleBreakChange(dayIdx, bIdx, 'endTime', e.target.value)}
+                                            required
+                                          />
+                                          <button
+                                            type="button"
+                                            className="btn btn-danger-subtle"
+                                            style={{ fontSize: '0.7rem', padding: '0.2rem 0.45rem' }}
+                                            onClick={() => handleRemoveBreak(dayIdx, bIdx)}
+                                            title="Remove Break"
+                                          >
+                                            ✕ Remove
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', padding: '0.4rem 0 0.2rem 0' }}>
+                                Doctor off-duty on {dayObj.dayOfWeek}. No consultation slots generated.
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Notification Message */}
+                      {scheduleMessage && (
+                        <div
+                          style={{
+                            background: scheduleMessage.type === 'success' ? '#064e3b' : '#451a03',
+                            border: `1px solid ${scheduleMessage.type === 'success' ? '#10b981' : '#f59e0b'}`,
+                            color: scheduleMessage.type === 'success' ? '#a7f3d0' : '#fef3c7',
+                            padding: '0.75rem 1rem',
+                            borderRadius: '8px',
+                            marginTop: '1rem',
+                            fontSize: '0.85rem',
+                          }}
+                        >
+                          {scheduleMessage.text}
+                        </div>
+                      )}
+
+                      {/* Save Action Bar */}
+                      <div className="admin-schedule-footer-bar">
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ padding: '0.55rem 1.35rem', fontWeight: 600, fontSize: '0.9rem' }}
+                          onClick={handleSaveSchedule}
+                          disabled={scheduleSaving}
+                        >
+                          {scheduleSaving ? '💾 Saving Schedule...' : `💾 Save Schedule for Dr. ${selectedAdminDoctor.fullName}`}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ padding: '0.55rem 1rem', fontSize: '0.85rem' }}
+                          onClick={handleResetSchedule}
+                          disabled={scheduleSaving}
+                        >
+                          Discard Changes
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* SUB-TAB 3: Financial Audit Trail */}
           {adminSubTab === 'financial_audit' && (
             <div style={{ background: '#090d16', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
@@ -3078,6 +5679,392 @@ export default function App() {
               )}
             </div>
           )}
+
+          {/* SUB-TAB 5: Operational Roster & Setup Health Inspector */}
+          {adminSubTab === 'roster' && (
+            <div style={{ background: '#090d16', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              {/* Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                  <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '1.15rem' }}>👥 Operational Roster & Setup Health Inspector</h3>
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    Inspect clinic readiness, doctor schedule coverage, staff clinic assignments, and active/inactive operational status across the platform.
+                  </p>
+                </div>
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+                  onClick={loadAdminRosterData}
+                  disabled={adminClinicsLoading || adminStaffLoading || adminDoctorsLoading}
+                >
+                  {adminClinicsLoading || adminStaffLoading || adminDoctorsLoading ? 'Refreshing...' : '🔄 Refresh Roster'}
+                </button>
+              </div>
+
+              {/* Health Inspector Summary Cards */}
+              {(() => {
+                const inactiveClinics = adminClinics.filter((c) => !c.isActive).length;
+                const inactiveDoctors = adminDoctors.filter((d) => !d.isActive).length;
+                const unscheduledDoctors = adminDoctors.filter((d) => !d.hasSchedule).length;
+                const inactiveStaff = adminStaffList.filter((s) => s.userId?.isActive === false || s.isActive === false).length;
+                const clinicsWithoutStaff = adminClinics.filter((c) => !adminStaffList.some((s) => (s.clinicId?._id || s.clinicId)?.toString() === c._id?.toString())).length;
+                const hasIssues = inactiveClinics > 0 || inactiveDoctors > 0 || unscheduledDoctors > 0 || clinicsWithoutStaff > 0;
+
+                return (
+                  <div>
+                    {hasIssues && (
+                      <div style={{ background: '#451a03', border: '1px solid #f59e0b', color: '#fef3c7', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1.25rem', fontSize: '0.85rem' }}>
+                        <strong>⚠️ Operational Setup Notice:</strong> QFlow detected {unscheduledDoctors > 0 ? `${unscheduledDoctors} doctor(s) without schedules, ` : ''}{clinicsWithoutStaff > 0 ? `${clinicsWithoutStaff} clinic(s) without staff, ` : ''}{inactiveClinics > 0 ? `${inactiveClinics} inactive clinic(s), ` : ''}{inactiveDoctors > 0 ? `${inactiveDoctors} inactive doctor(s).` : ''} Review below to ensure smooth reception operations.
+                      </div>
+                    )}
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem', marginBottom: '1.5rem' }}>
+                      <div style={{ background: '#0d1322', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.75rem', textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Clinics</div>
+                        <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#38bdf8', marginTop: '0.2rem' }}>{adminClinics.length}</div>
+                        <div style={{ fontSize: '0.72rem', color: inactiveClinics > 0 ? '#f59e0b' : '#10b981', marginTop: '0.2rem' }}>
+                          {inactiveClinics > 0 ? `${inactiveClinics} Inactive` : '✓ All Active'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#0d1322', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.75rem', textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Doctors</div>
+                        <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#a855f7', marginTop: '0.2rem' }}>{adminDoctors.length}</div>
+                        <div style={{ fontSize: '0.72rem', color: unscheduledDoctors > 0 ? '#f59e0b' : '#10b981', marginTop: '0.2rem' }}>
+                          {unscheduledDoctors > 0 ? `${unscheduledDoctors} Unscheduled` : '✓ All Scheduled'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#0d1322', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.75rem', textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Staff Members</div>
+                        <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#10b981', marginTop: '0.2rem' }}>{adminStaffList.length}</div>
+                        <div style={{ fontSize: '0.72rem', color: inactiveStaff > 0 ? '#f59e0b' : '#10b981', marginTop: '0.2rem' }}>
+                          {inactiveStaff > 0 ? `${inactiveStaff} Inactive` : '✓ All Active'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#0d1322', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.75rem', textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Unstaffed Clinics</div>
+                        <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: clinicsWithoutStaff > 0 ? '#ef4444' : '#10b981', marginTop: '0.2rem' }}>
+                          {clinicsWithoutStaff}
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                          {clinicsWithoutStaff > 0 ? 'Needs Staff Assignment' : '✓ Full Coverage'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Filter & Search Bar */}
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', gap: '0.35rem' }}>
+                  <button
+                    type="button"
+                    className={`btn ${adminRosterFilter === 'ALL' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '0.8rem', padding: '0.3rem 0.65rem' }}
+                    onClick={() => setAdminRosterFilter('ALL')}
+                  >
+                    All ({adminClinics.length + adminDoctors.length + adminStaffList.length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${adminRosterFilter === 'CLINICS' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '0.8rem', padding: '0.3rem 0.65rem' }}
+                    onClick={() => setAdminRosterFilter('CLINICS')}
+                  >
+                    Clinics ({adminClinics.length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${adminRosterFilter === 'DOCTORS' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '0.8rem', padding: '0.3rem 0.65rem' }}
+                    onClick={() => setAdminRosterFilter('DOCTORS')}
+                  >
+                    Doctors ({adminDoctors.length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${adminRosterFilter === 'STAFF' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '0.8rem', padding: '0.3rem 0.65rem' }}
+                    onClick={() => setAdminRosterFilter('STAFF')}
+                  >
+                    Staff ({adminStaffList.length})
+                  </button>
+                </div>
+
+                <div style={{ flex: 1, minWidth: '220px' }}>
+                  <input
+                    type="text"
+                    className="filter-input"
+                    style={{ width: '100%', fontSize: '0.85rem' }}
+                    placeholder="Search by name, code, email, or clinic..."
+                    value={adminRosterSearch}
+                    onChange={(e) => setAdminRosterSearch(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Roster Listings */}
+              {(adminClinicsLoading || adminStaffLoading || adminDoctorsLoading) ? (
+                <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  Loading operational roster data...
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                  {/* CLINICS SECTION */}
+                  {(adminRosterFilter === 'ALL' || adminRosterFilter === 'CLINICS') && (
+                    <div>
+                      <h4 style={{ margin: '0 0 0.6rem 0', color: '#38bdf8', fontSize: '0.95rem' }}>
+                        🏥 Clinics ({adminClinics.length})
+                      </h4>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: '0.75rem' }}>
+                        {adminClinics
+                          .filter((c) => {
+                            if (!adminRosterSearch.trim()) return true;
+                            const q = adminRosterSearch.toLowerCase();
+                            return c.name?.toLowerCase().includes(q) || c.code?.toLowerCase().includes(q) || c.address?.city?.toLowerCase().includes(q);
+                          })
+                          .map((clinic) => {
+                            const clinicStaff = adminStaffList.filter((s) => (s.clinicId?._id || s.clinicId)?.toString() === clinic._id?.toString());
+                            const clinicDocs = adminDoctors.filter((d) => (d.clinicId?._id || d.clinicId)?.toString() === clinic._id?.toString());
+                            return (
+                              <div
+                                key={clinic._id}
+                                style={{
+                                  background: '#0d1322',
+                                  border: `1px solid ${clinic.isActive ? 'var(--border)' : '#7f1d1d'}`,
+                                  borderRadius: '6px',
+                                  padding: '0.85rem',
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                  <strong style={{ fontSize: '0.95rem', color: 'var(--text-main)' }}>{clinic.name}</strong>
+                                  <span
+                                    style={{
+                                      fontSize: '0.7rem',
+                                      padding: '0.12rem 0.35rem',
+                                      borderRadius: '4px',
+                                      background: clinic.isActive ? '#064e3b' : '#450a0a',
+                                      color: clinic.isActive ? '#6ee7b7' : '#fca5a5',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {clinic.isActive ? 'ACTIVE' : 'INACTIVE'}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                                  Code: <strong>{clinic.code || 'N/A'}</strong> | {clinic.address?.city || 'City'}, {clinic.address?.state || 'State'}
+                                </div>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                                  Phone: {clinic.phone || 'N/A'} | Policy: {clinic.queuePolicy || 'HYBRID'}
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: '#94a3b8', borderTop: '1px solid var(--border)', paddingTop: '0.4rem', marginTop: '0.5rem', display: 'flex', justifyContent: 'space-between' }}>
+                                  <span>Doctors: <strong>{clinicDocs.length}</strong></span>
+                                  <span>Staff Assigned: <strong style={{ color: clinicStaff.length === 0 ? '#f59e0b' : '#10b981' }}>{clinicStaff.length}</strong></span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* DOCTORS SECTION */}
+                  {(adminRosterFilter === 'ALL' || adminRosterFilter === 'DOCTORS') && (
+                    <div>
+                      <h4 style={{ margin: '0 0 0.6rem 0', color: '#a855f7', fontSize: '0.95rem' }}>
+                        👨‍⚕️ Doctors ({adminDoctors.length})
+                      </h4>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: '0.75rem' }}>
+                        {adminDoctors
+                          .filter((d) => {
+                            if (!adminRosterSearch.trim()) return true;
+                            const q = adminRosterSearch.toLowerCase();
+                            return d.fullName?.toLowerCase().includes(q) || d.specialtyId?.name?.toLowerCase().includes(q) || d.clinicId?.name?.toLowerCase().includes(q);
+                          })
+                          .map((doc) => (
+                            <div
+                              key={doc._id}
+                              style={{
+                                background: '#0d1322',
+                                border: `1px solid ${doc.isActive ? 'var(--border)' : '#7f1d1d'}`,
+                                borderRadius: '6px',
+                                padding: '0.85rem',
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                <strong style={{ fontSize: '0.95rem', color: 'var(--text-main)' }}>Dr. {doc.fullName}</strong>
+                                <span
+                                  style={{
+                                    fontSize: '0.7rem',
+                                    padding: '0.12rem 0.35rem',
+                                    borderRadius: '4px',
+                                    background: doc.isActive ? '#064e3b' : '#450a0a',
+                                    color: doc.isActive ? '#6ee7b7' : '#fca5a5',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {doc.isActive ? 'ACTIVE' : 'INACTIVE'}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                                Specialty: <strong>{doc.specialtyId?.name || 'General'}</strong> | Clinic: {doc.clinicId?.name || 'Assigned Clinic'}
+                              </div>
+                              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                                Consultation Duration: <strong>{doc.averageConsultationDurationMinutes || 15} min</strong>
+                              </div>
+                              <div style={{ fontSize: '0.75rem', borderTop: '1px solid var(--border)', paddingTop: '0.4rem', marginTop: '0.5rem', display: 'flex', justifyContent: 'space-between' }}>
+                                <span style={{ color: doc.hasSchedule ? '#10b981' : '#f59e0b' }}>
+                                  {doc.hasSchedule ? '✓ Schedule Configured' : '⚠️ No Schedule'}
+                                </span>
+                                <button
+                                  className="btn btn-secondary"
+                                  style={{ fontSize: '0.7rem', padding: '0.15rem 0.45rem' }}
+                                  onClick={() => {
+                                    setAdminSubTab('schedules');
+                                    initScheduleForDoctor(doc);
+                                  }}
+                                >
+                                  Edit Schedule
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* STAFF SECTION */}
+                  {(adminRosterFilter === 'ALL' || adminRosterFilter === 'STAFF') && (
+                    <div>
+                      <h4 style={{ margin: '0 0 0.6rem 0', color: '#10b981', fontSize: '0.95rem' }}>
+                        👔 Staff Operators ({adminStaffList.length})
+                      </h4>
+                      {adminStaffList.length === 0 ? (
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No staff members registered.</div>
+                      ) : (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: '0.75rem' }}>
+                          {adminStaffList
+                            .filter((s) => {
+                              if (!adminRosterSearch.trim()) return true;
+                              const q = adminRosterSearch.toLowerCase();
+                              return s.userId?.fullName?.toLowerCase().includes(q) || s.userId?.email?.toLowerCase().includes(q) || s.clinicId?.name?.toLowerCase().includes(q);
+                            })
+                            .map((staff) => {
+                              const isActive = staff.userId?.isActive !== false && staff.isActive !== false;
+                              return (
+                                <div
+                                  key={staff._id}
+                                  style={{
+                                    background: '#0d1322',
+                                    border: `1px solid ${isActive ? 'var(--border)' : '#7f1d1d'}`,
+                                    borderRadius: '6px',
+                                    padding: '0.85rem',
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                    <strong style={{ fontSize: '0.95rem', color: 'var(--text-main)' }}>
+                                      {staff.userId?.fullName || 'Staff Member'}
+                                    </strong>
+                                    <span
+                                      style={{
+                                        fontSize: '0.7rem',
+                                        padding: '0.12rem 0.35rem',
+                                        borderRadius: '4px',
+                                        background: isActive ? '#064e3b' : '#450a0a',
+                                        color: isActive ? '#6ee7b7' : '#fca5a5',
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      {isActive ? 'ACTIVE' : 'INACTIVE'}
+                                    </span>
+                                  </div>
+                                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                                    Email: {staff.userId?.email || 'N/A'} | Phone: {staff.userId?.phone || 'N/A'}
+                                  </div>
+                                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                                    Role: <strong>{staff.userId?.role || 'STAFF'}</strong> | Clinic: <strong style={{ color: 'var(--primary)' }}>{staff.clinicId?.name || 'Unassigned'}</strong>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Doctor Cancel Appointment Modal (Phase 5) */}
+      {doctorCancelModal.isOpen && doctorCancelModal.appointment && (
+        <div className="modal-overlay" onClick={() => !doctorCancelModal.loading && setDoctorCancelModal({ isOpen: false, appointment: null, reason: '', loading: false, error: null })}>
+          <div className="modal-content" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
+            <button
+              className="modal-close"
+              disabled={doctorCancelModal.loading}
+              onClick={() => setDoctorCancelModal({ isOpen: false, appointment: null, reason: '', loading: false, error: null })}
+            >
+              ×
+            </button>
+            <h3 style={{ fontSize: '1.25rem', color: 'var(--status-danger)', margin: '0 0 0.5rem 0' }}>
+              Cancel Consultation Appointment
+            </h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+              Are you sure you want to cancel this appointment? The patient will be notified and this slot will be released back to available capacity.
+            </p>
+
+            <div style={{ background: '#090d16', padding: '0.85rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1rem', fontSize: '0.85rem' }}>
+              <div><strong>Patient:</strong> {doctorCancelModal.appointment.patientId?.fullName || 'Patient'}</div>
+              <div><strong>Date & Time:</strong> {doctorCancelModal.appointment.appointmentDate} • {doctorCancelModal.appointment.timeSlot?.startTime} - {doctorCancelModal.appointment.timeSlot?.endTime}</div>
+              <div><strong>Ref ID:</strong> #{doctorCancelModal.appointment._id}</div>
+            </div>
+
+            {doctorCancelModal.error && (
+              <div style={{ background: '#450a0a', border: '1px solid #ef4444', color: '#fee2e2', padding: '0.65rem', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                ⚠️ {doctorCancelModal.error}
+              </div>
+            )}
+
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-main)', marginBottom: '0.35rem', fontWeight: 600 }}>
+                Reason for Cancellation (Optional)
+              </label>
+              <textarea
+                className="filter-input"
+                style={{ width: '100%', minHeight: '80px', padding: '0.5rem', resize: 'vertical' }}
+                placeholder="e.g., Doctor emergency, surgery schedule conflict, clinic maintenance..."
+                value={doctorCancelModal.reason}
+                onChange={(e) => setDoctorCancelModal((prev) => ({ ...prev, reason: e.target.value }))}
+                disabled={doctorCancelModal.loading}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={doctorCancelModal.loading}
+                onClick={() => setDoctorCancelModal({ isOpen: false, appointment: null, reason: '', loading: false, error: null })}
+              >
+                Keep Appointment
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ background: '#dc2626', borderColor: '#ef4444' }}
+                disabled={doctorCancelModal.loading}
+                onClick={handleDoctorCancelAppointment}
+              >
+                {doctorCancelModal.loading ? 'Cancelling...' : 'Confirm Cancellation'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -3280,6 +6267,7 @@ export default function App() {
               <div><strong>Qualifications:</strong> {profileData.qualifications?.join(', ') || 'MBBS'}</div>
               <div><strong>Clinical Experience:</strong> {profileData.experienceYears} Years</div>
               <div><strong>Consultation Fee:</strong> <span style={{ color: 'var(--primary-light)', fontWeight: 700 }}>₹{profileData.consultationFee}</span></div>
+              <div><strong>Weekly Schedule:</strong> {profileData.workingDays && profileData.workingDays.length > 0 ? formatWorkingDays(profileData.workingDays) : 'Schedule not configured'}</div>
             </div>
 
             <button className="btn btn-primary" style={{ width: '100%', padding: '0.75rem' }} onClick={() => handleProceedToAppointment(selectedDoctor)}>
@@ -3297,11 +6285,23 @@ export default function App() {
             <h2 style={{ fontSize: '1.3rem', fontWeight: 700, margin: '0 0 0.5rem 0' }}>Book Consultation Slot</h2>
             <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
               Select your appointment date and preferred consultation time with <strong>Dr. {bookingDoctor.fullName}</strong>.
+              {bookingDoctor.workingDays && bookingDoctor.workingDays.length > 0 && (
+                <div style={{ marginTop: '0.35rem', color: 'var(--primary-light)', fontSize: '0.8rem' }}>
+                  Weekly Working Days: <strong>{formatWorkingDays(bookingDoctor.workingDays)}</strong>
+                </div>
+              )}
             </div>
 
             <div style={{ marginBottom: '1.25rem' }}>
               <label className="filter-label" style={{ marginBottom: '0.35rem', display: 'block' }}>Consultation Date</label>
-              <input type="date" className="filter-input" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} style={{ width: '100%' }} />
+              <input
+                type="date"
+                className="filter-input"
+                value={selectedDate}
+                min={getTodayDateIST()}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                style={{ width: '100%' }}
+              />
             </div>
 
             <div style={{ marginBottom: '1.5rem' }}>
@@ -3322,8 +6322,65 @@ export default function App() {
                   ))}
                 </div>
               ) : (
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', background: 'var(--surface-ground)', padding: '1rem', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
-                  No available slots found for this date. Please choose another date.
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', background: 'var(--surface-ground)', padding: '1.1rem', borderRadius: 'var(--radius-md)', textAlign: 'center', border: '1px solid var(--border-subtle)' }}>
+                  {availability?.message ? (
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.35rem' }}>
+                        {availability.message.includes('not configured')
+                          ? 'Schedule Not Configured'
+                          : availability.message.includes('does not work')
+                          ? 'Doctor Off-Duty On This Day'
+                          : availability.isPastDate
+                          ? 'Past Date Selected'
+                          : availability.isError
+                          ? 'Availability Notice'
+                          : 'No Slots Available'}
+                      </div>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                        {availability.message}
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.35rem' }}>
+                        No Remaining Slots
+                      </div>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                        All consultation slots for this date are fully booked or have passed. Please choose another date.
+                      </div>
+                    </div>
+                  )}
+                  {availability?.isError && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.75rem', marginTop: '0.75rem', padding: '0.35rem 0.75rem' }}
+                      onClick={() => {
+                        if (bookingDoctor && selectedDate) {
+                          setLoadingAvail(true);
+                          fetchDoctorAvailability(bookingDoctor._id, selectedDate).then((res) => {
+                            if (res.ok && res.data) {
+                              setAvailability(res.data);
+                            } else {
+                              setAvailability({
+                                success: false,
+                                availableSlots: [],
+                                message:
+                                  res.data?.message ||
+                                  res.error ||
+                                  'Unable to load appointment availability. Please check your connection and try again.',
+                                isError: true,
+                                status: res.status,
+                              });
+                            }
+                            setLoadingAvail(false);
+                          });
+                        }
+                      }}
+                    >
+                      Retry Loading Slots
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -3334,18 +6391,100 @@ export default function App() {
               </div>
             )}
 
-<button
-  className="btn btn-primary"
-  style={{ width: '100%', padding: '0.75rem' }}
-  disabled={!selectedSlot}
-  onClick={handleConfirmBooking}
->
-  Confirm Booking (
-  {selectedSlot
-    ? `${selectedSlot.startTime} - ${selectedSlot.endTime}`
-    : 'Select a slot'}
-  )
-</button>
+            {selectedSlot && (
+              <div style={{ background: 'rgba(14, 165, 233, 0.08)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: 'var(--radius-md)', padding: '0.75rem 1rem', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
+                <div>
+                  <div style={{ fontWeight: 600, color: 'var(--primary-light)' }}>Selected Consultation Slot:</div>
+                  <div style={{ color: 'var(--text-main)', marginTop: '0.15rem' }}>
+                    {selectedDate} at <strong>{selectedSlot.startTime} – {selectedSlot.endTime}</strong>
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Consultation Fee</div>
+                  <div style={{ fontWeight: 700, color: 'var(--text-main)' }}>₹{bookingDoctor.consultationFee || 0}</div>
+                </div>
+              </div>
+            )}
+
+            <button
+              className="btn btn-primary"
+              style={{ width: '100%', padding: '0.75rem', fontWeight: 600 }}
+              disabled={!selectedSlot || bookingLoading}
+              onClick={handleConfirmBooking}
+            >
+              {bookingLoading
+                ? 'Booking Consultation Slot...'
+                : selectedSlot
+                ? `Confirm Booking (${selectedSlot.startTime} - ${selectedSlot.endTime})`
+                : 'Select a Slot to Continue'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Stage 4 Appointment Confirmation Modal */}
+      {bookingSuccess && (
+        <div className="modal-overlay" onClick={() => setBookingSuccess(null)}>
+          <div className="modal-content" style={{ maxWidth: '480px', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setBookingSuccess(null)}>×</button>
+            <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🎉</div>
+            <h2 style={{ fontSize: '1.35rem', fontWeight: 700, margin: '0 0 0.5rem 0', color: 'var(--text-main)' }}>
+              Appointment Confirmed!
+            </h2>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
+              Your consultation has been successfully reserved with the clinic.
+            </div>
+
+            <div style={{ background: 'var(--surface-ground)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: '1rem', textAlign: 'left', marginBottom: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.55rem', fontSize: '0.88rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.45rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Doctor:</span>
+                <strong style={{ color: 'var(--text-main)' }}>Dr. {bookingSuccess.doctorName}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.45rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Clinic:</span>
+                <span style={{ color: 'var(--text-secondary)' }}>{bookingSuccess.clinicName || 'Assigned Clinic'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.45rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Date:</span>
+                <strong>{bookingSuccess.appointmentDate}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.45rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Time Slot:</span>
+                <strong style={{ color: 'var(--primary-light)' }}>
+                  {bookingSuccess.timeSlot?.startTime} - {bookingSuccess.timeSlot?.endTime}
+                </strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Status:</span>
+                <span className="badge badge-success">BOOKED</span>
+              </div>
+            </div>
+
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginBottom: '1.25rem', lineHeight: 1.4 }}>
+              ℹ️ Please arrive at the clinic 15–30 minutes prior to your slot time for check-in and queue token generation.
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ flex: 1, padding: '0.65rem' }}
+                onClick={() => {
+                  setBookingSuccess(null);
+                  setViewTab('my_appointments');
+                }}
+              >
+                📅 View in My Appointments
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ flex: 1, padding: '0.65rem' }}
+                onClick={() => setBookingSuccess(null)}
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}

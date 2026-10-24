@@ -23,9 +23,11 @@ import reconciliationRoutes from './routes/reconciliationRoutes.js';
 import { notFoundHandler, errorHandler } from './middleware/errorMiddleware.js';
 import {
   securityHeaders,
+  apiRateLimiter,
   authRateLimiter,
   publicDisplayRateLimiter,
 } from './middleware/securityMiddleware.js';
+import { validateEnvironment } from './config/envValidator.js';
 
 // Load environment variables
 dotenv.config();
@@ -34,14 +36,21 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 
+// Disable Express fingerprint header to prevent technology disclosure
+app.disable('x-powered-by');
+
+// Trust first proxy hop (e.g. Render, Cloudflare, AWS ALB, Nginx) for accurate client IP resolution
+app.set('trust proxy', 1);
+
 // Security Headers Middleware
 app.use(securityHeaders);
 
 // Parse comma-separated or single CLIENT_URL values for flexible cross-origin support
+// Normalizes trailing slashes to match browser Origin headers exactly
 // Wildcard origins ('*') are strictly prohibited when credentials: true is enabled per CORS security specification
 const allowedOrigins = CLIENT_URL
   .split(',')
-  .map((origin) => origin.trim())
+  .map((origin) => origin.trim().replace(/\/+$/, ''))
   .filter((origin) => origin && origin !== '*');
 
 const corsOptions = {
@@ -50,7 +59,8 @@ const corsOptions = {
     if (!origin) {
       return callback(null, true);
     }
-    if (allowedOrigins.includes(origin)) {
+    const normalizedOrigin = origin.trim().replace(/\/+$/, '');
+    if (allowedOrigins.includes(normalizedOrigin)) {
       return callback(null, true);
     }
     return callback(null, false);
@@ -58,10 +68,13 @@ const corsOptions = {
   credentials: true,
 };
 
-// Standard Middleware
+// Standard Middleware with explicit body size limits and inflation disabled (prevents payload memory exhaustion DoS)
 app.use(cors(corsOptions));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '1mb', inflate: false }));
+app.use(express.urlencoded({ extended: true, limit: '1mb', inflate: false }));
+
+// General API Rate Limiting (500 req / 15m)
+app.use('/api', apiRateLimiter);
 
 // Bounded IP Rate Limiters for Sensitive Endpoints
 app.use('/api/auth/login', authRateLimiter);
@@ -93,6 +106,9 @@ app.use(errorHandler);
 
 // Start server function with Graceful Shutdown & Observability
 export const startServer = async () => {
+  // Validate runtime environment configuration before opening network listener
+  validateEnvironment();
+
   const server = app.listen(PORT, () => {
     const routeCount = app._router?.stack?.filter((r) => r.route || r.name === 'router')?.length || 0;
     console.log(`QFlow Express Server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
@@ -151,7 +167,9 @@ export const startServer = async () => {
   return server;
 };
 
-// Auto-run when started directly
-startServer();
+// Auto-run when started directly (skip auto-listen during automated testing)
+if (process.env.NODE_ENV !== 'test' && !process.env.IS_TEST_RUNNER) {
+  startServer();
+}
 
 export default app;

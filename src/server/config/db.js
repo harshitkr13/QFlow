@@ -45,7 +45,7 @@ export const isTestExecutionContext = () => {
   if (process.env.IS_TEST_RUNNER === 'true') return true;
   if (process.argv && process.argv.length > 1) {
     return process.argv.some((arg) =>
-      /validate[A-Za-z0-9_]*\.js|runAllValidations\.js/i.test(arg)
+      /\.test\.[mc]?js|validate[A-Za-z0-9_]*\.js|runAllValidations\.js/i.test(arg)
     );
   }
   return false;

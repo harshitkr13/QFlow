@@ -1,4 +1,4 @@
-import { Clinic } from '../models/index.js';
+import { Clinic, Staff } from '../models/index.js';
 
 /**
  * Validate GeoJSON Point structure
@@ -186,6 +186,32 @@ export const updateClinic = async (req, res, next) => {
       success: true,
       message: 'Clinic updated successfully',
       clinic,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Get staff members list (Admin only)
+ * @route   GET /api/admin/staff
+ * @access  Private (ADMIN)
+ */
+export const getStaffListAdmin = async (req, res, next) => {
+  try {
+    const { clinicId } = req.query;
+    const filter = {};
+    if (clinicId) filter.clinicId = clinicId;
+
+    const staff = await Staff.find(filter)
+      .populate('userId', 'fullName email phone role isActive')
+      .populate('clinicId', 'name city isActive code')
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: staff.length,
+      staff,
     });
   } catch (error) {
     next(error);

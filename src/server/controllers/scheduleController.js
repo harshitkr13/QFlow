@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { DoctorSchedule, Doctor } from '../models/index.js';
 
 const VALID_DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
@@ -95,6 +96,9 @@ export const validateWeeklyHours = (weeklyHours) => {
  */
 export const getDoctorSchedule = async (req, res, next) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid doctor ID format' });
+    }
     const doctor = await Doctor.findById(req.params.id);
     if (!doctor) {
       return res.status(404).json({ success: false, message: 'Doctor not found' });
@@ -118,28 +122,86 @@ export const getDoctorSchedule = async (req, res, next) => {
 };
 
 /**
+ * @desc    Get doctor own recurring schedule & details (Doctor only)
+ * @route   GET /api/doctors/me/schedule
+ * @access  Private (DOCTOR)
+ */
+export const getDoctorScheduleSelf = async (req, res, next) => {
+  try {
+    let doctor = null;
+    if (req.user && req.user.doctorId) {
+      doctor = await Doctor.findById(req.user.doctorId).populate('clinicId', 'name address');
+    }
+    if (!doctor) {
+      const userId = req.user?._id || req.user?.id;
+      if (userId) {
+        doctor = await Doctor.findOne({ userId }).populate('clinicId', 'name address');
+      }
+    }
+    if (!doctor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Doctor profile not found for this account',
+      });
+    }
+
+    const schedule = await DoctorSchedule.findOne({ doctorId: doctor._id, isActive: true });
+
+    return res.status(200).json({
+      success: true,
+      schedule: schedule || null,
+      doctor: {
+        _id: doctor._id,
+        fullName: doctor.fullName,
+        averageConsultationDurationMinutes: doctor.averageConsultationDurationMinutes || 15,
+        clinic: doctor.clinicId,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * @desc    Doctor update own schedule (Doctor only)
  * @route   PUT /api/doctors/me/schedule
  * @access  Private (DOCTOR)
  */
 export const updateScheduleSelf = async (req, res, next) => {
   try {
-    if (!req.user || !req.user.doctorId) {
-      return res.status(403).json({
+    let doctor = null;
+    if (req.user && req.user.doctorId) {
+      doctor = await Doctor.findById(req.user.doctorId);
+    }
+    if (!doctor) {
+      const userId = req.user?._id || req.user?.id;
+      if (userId) {
+        doctor = await Doctor.findOne({ userId });
+      }
+    }
+    if (!doctor) {
+      return res.status(404).json({
         success: false,
         message: 'Doctor profile not found for this account',
       });
     }
 
-    const { weeklyHours } = req.body;
+    const { weeklyHours, averageConsultationDurationMinutes } = req.body;
     const errorMsg = validateWeeklyHours(weeklyHours);
     if (errorMsg) {
       return res.status(400).json({ success: false, message: errorMsg });
     }
 
-    const doctor = await Doctor.findById(req.user.doctorId);
-    if (!doctor) {
-      return res.status(404).json({ success: false, message: 'Doctor not found' });
+    if (averageConsultationDurationMinutes !== undefined) {
+      const durationNum = Number(averageConsultationDurationMinutes);
+      if (isNaN(durationNum) || durationNum < 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'averageConsultationDurationMinutes must be a positive integer >= 1',
+        });
+      }
+      doctor.averageConsultationDurationMinutes = durationNum;
+      await doctor.save();
     }
 
     let schedule = await DoctorSchedule.findOne({ doctorId: doctor._id, isActive: true });
@@ -159,6 +221,11 @@ export const updateScheduleSelf = async (req, res, next) => {
       success: true,
       message: 'Schedule updated successfully',
       schedule,
+      doctor: {
+        _id: doctor._id,
+        fullName: doctor.fullName,
+        averageConsultationDurationMinutes: doctor.averageConsultationDurationMinutes,
+      },
     });
   } catch (error) {
     next(error);
@@ -177,10 +244,22 @@ export const updateScheduleAdmin = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Doctor not found' });
     }
 
-    const { weeklyHours } = req.body;
+    const { weeklyHours, averageConsultationDurationMinutes } = req.body;
     const errorMsg = validateWeeklyHours(weeklyHours);
     if (errorMsg) {
       return res.status(400).json({ success: false, message: errorMsg });
+    }
+
+    if (averageConsultationDurationMinutes !== undefined) {
+      const durationNum = Number(averageConsultationDurationMinutes);
+      if (isNaN(durationNum) || durationNum < 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'averageConsultationDurationMinutes must be a positive integer >= 1',
+        });
+      }
+      doctor.averageConsultationDurationMinutes = durationNum;
+      await doctor.save();
     }
 
     let schedule = await DoctorSchedule.findOne({ doctorId: doctor._id, isActive: true });
@@ -200,6 +279,11 @@ export const updateScheduleAdmin = async (req, res, next) => {
       success: true,
       message: 'Doctor schedule updated by admin successfully',
       schedule,
+      doctor: {
+        _id: doctor._id,
+        fullName: doctor.fullName,
+        averageConsultationDurationMinutes: doctor.averageConsultationDurationMinutes,
+      },
     });
   } catch (error) {
     next(error);

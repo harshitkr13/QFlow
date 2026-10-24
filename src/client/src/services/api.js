@@ -655,10 +655,45 @@ export const updateDoctorSelfStatus = async (statusData, token) => {
   }
 };
 
-export const fetchDoctorOwnAppointments = async (token) => {
+export const fetchDoctorOwnAppointments = async (token, params = {}) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/doctors/me/appointments`, {
+    const query = new URLSearchParams();
+    if (params?.scope) query.append('scope', params.scope);
+    if (params?.date) query.append('date', params.date);
+    if (params?.status) query.append('status', params.status);
+    const qs = query.toString();
+    const url = `${API_BASE_URL}/doctors/me/appointments${qs ? `?${qs}` : ''}`;
+    const response = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchDoctorOwnSchedule = async (token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/doctors/me/schedule`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const updateDoctorScheduleSelf = async (scheduleData, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/doctors/me/schedule`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(scheduleData),
     });
     const data = await response.json();
     return { ok: response.ok, status: response.status, data };
@@ -889,6 +924,94 @@ export const updateClinicOperationalPolicy = async (clinicId, policyData, token)
     return { ok: false, status: 0, error: error.message };
   }
 };
+
+export const fetchAdminDoctors = async (token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/doctors`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchDoctorSchedule = async (doctorId, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/doctors/${doctorId}/schedule`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const updateDoctorScheduleAdmin = async (doctorId, scheduleData, token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/admin/doctors/${doctorId}/schedule`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(scheduleData),
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchStaffAppointments = async (token, params = {}) => {
+  try {
+    const query = new URLSearchParams();
+    if (params?.date) query.append('date', params.date);
+    if (params?.status) query.append('status', params.status);
+    if (params?.doctorId) query.append('doctorId', params.doctorId);
+    const qs = query.toString();
+    const url = `${API_BASE_URL}/staff/appointments${qs ? `?${qs}` : ''}`;
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchAdminClinics = async (token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/admin/clinics`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
+export const fetchAdminStaff = async (token, params = {}) => {
+  try {
+    const query = new URLSearchParams();
+    if (params?.clinicId) query.append('clinicId', params.clinicId);
+    const qs = query.toString();
+    const url = `${API_BASE_URL}/admin/staff${qs ? `?${qs}` : ''}`;
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
 
 
 

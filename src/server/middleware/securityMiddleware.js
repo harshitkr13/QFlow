@@ -6,15 +6,18 @@
 
 /**
  * Security Headers Middleware.
- * Protects against clickjacking, MIME sniffing, and cross-site scripting.
+ * Protects against clickjacking, MIME sniffing, cross-site scripting, and unwanted browser capabilities.
  */
 export const securityHeaders = (req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.removeHeader('X-Powered-By');
 
-  // Apply Strict-Transport-Security only in production to protect plain HTTP localhost in development
-  if (process.env.NODE_ENV === 'production') {
+  // Apply Strict-Transport-Security only in production/staging to protect plain HTTP localhost in development
+  if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
 
@@ -48,8 +51,8 @@ export const createRateLimiter = ({
   }
 
   return (req, res, next) => {
-    // Determine client IP (handles x-forwarded-for or connection remoteAddress)
-    const clientIp = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket?.remoteAddress || '127.0.0.1';
+    // Determine client IP (prioritizes req.ip resolved via Express trust proxy)
+    const clientIp = req.ip || req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket?.remoteAddress || '127.0.0.1';
     const now = Date.now();
 
     let record = ipStore.get(clientIp);
@@ -83,6 +86,13 @@ export const createRateLimiter = ({
     next();
   };
 };
+
+// General API Rate Limiter: 500 requests per 15-minute window
+export const apiRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  maxRequests: 500,
+  message: 'Too many API requests from this IP. Please throttle requests.'
+});
 
 // Sensitive Auth Endpoints Rate Limiter: 30 requests per 15-minute window
 export const authRateLimiter = createRateLimiter({

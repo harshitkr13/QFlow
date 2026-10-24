@@ -1030,14 +1030,39 @@
   white-space: nowrap;
 }
 
-/* Session Note */
+/* Schedule & Session Notes */
+.doc-schedule-note {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+  line-height: 1.4;
+}
+
+.doc-schedule-note svg {
+  flex-shrink: 0;
+  color: var(--primary-light);
+}
+
+.doc-schedule-configured {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.doc-schedule-unconfigured {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
 .doc-session-note {
   display: flex;
   align-items: center;
   gap: 0.4rem;
   font-size: 0.78rem;
   color: var(--text-muted);
-  margin-bottom: 1.35rem;
+  margin-bottom: 1.25rem;
 }
 
 .doc-session-note svg {
@@ -1454,4 +1479,324 @@ tr:hover td {
     width: 100%;
     flex: none;
   }
+}
+
+/* ==========================================================================
+   Admin Doctor Schedules Management UI (Phase 2)
+   ========================================================================== */
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.badge-primary {
+  background: rgba(14, 165, 233, 0.12);
+  color: var(--primary-light, #38bdf8);
+  border: 1px solid rgba(14, 165, 233, 0.28);
+}
+
+.badge-success {
+  background: var(--status-success-bg, rgba(16, 185, 129, 0.12));
+  color: var(--status-success, #10b981);
+  border: 1px solid var(--status-success-border, rgba(16, 185, 129, 0.28));
+}
+
+.badge-warning {
+  background: var(--status-warning-bg, rgba(245, 158, 11, 0.12));
+  color: var(--status-warning, #f59e0b);
+  border: 1px solid var(--status-warning-border, rgba(245, 158, 11, 0.28));
+}
+
+.badge-danger {
+  background: var(--status-danger-bg, rgba(239, 68, 68, 0.12));
+  color: var(--status-danger, #ef4444);
+  border: 1px solid var(--status-danger-border, rgba(239, 68, 68, 0.28));
+}
+
+.badge-secondary {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted, #94a3b8);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.btn-xs {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  border-radius: var(--radius-sm, 4px);
+}
+
+/* Schedules 2-Column Split Layout */
+.admin-schedules-grid {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .admin-schedules-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.admin-schedules-sidebar {
+  background: var(--surface-ground, #0d1322);
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-md, 8px);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-doctor-roster-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 640px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.admin-doctor-roster-item {
+  background: var(--surface-card, #111a2e);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+  border-radius: var(--radius-sm, 6px);
+  padding: 0.75rem 0.85rem;
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s ease);
+}
+
+.admin-doctor-roster-item:hover {
+  background: var(--surface-card-hover, #16223b);
+  border-color: var(--border-hover, rgba(56, 189, 248, 0.35));
+}
+
+.admin-doctor-roster-item.selected {
+  background: rgba(14, 165, 233, 0.08);
+  border-color: var(--primary-light, #38bdf8);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.15);
+}
+
+.admin-schedules-editor {
+  background: var(--surface-ground, #0d1322);
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-md, 8px);
+  padding: 1.25rem;
+}
+
+.admin-doc-editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+}
+
+.admin-schedule-presets-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-sm, 6px);
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 1.25rem;
+}
+
+.admin-schedule-days-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.admin-schedule-day-card {
+  border-radius: var(--radius-sm, 6px);
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+  transition: border-color var(--transition-fast, 0.15s ease);
+}
+
+.admin-schedule-day-card.day-active {
+  background: rgba(14, 165, 233, 0.03);
+  border-color: rgba(56, 189, 248, 0.25);
+}
+
+.admin-schedule-day-card.day-inactive {
+  background: rgba(255, 255, 255, 0.015);
+  border-color: var(--border-subtle, rgba(255, 255, 255, 0.06));
+  opacity: 0.85;
+}
+
+.day-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.day-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.day-card-body {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border-subtle, rgba(255, 255, 255, 0.08));
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.shift-interval-row,
+.break-interval-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.time-input {
+  width: 95px !important;
+  padding: 0.3rem 0.5rem !important;
+  font-size: 0.82rem !important;
+  text-align: center;
+}
+
+.btn-danger-subtle {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s ease);
+}
+
+.btn-danger-subtle:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+}
+
+.admin-schedule-footer-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border-default, rgba(255, 255, 255, 0.1));
+}
+
+/* ==========================================================================
+   Phase 5: Doctor Appointments & Clinical Workspace Styles
+   ========================================================================== */
+
+.doctor-appts-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.doctor-filter-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  background: var(--surface-ground, #090d16);
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.1));
+}
+
+.doctor-appts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .doctor-appts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.doctor-appt-card {
+  background: var(--surface-ground, #090d16);
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-md, 10px);
+  padding: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  transition: border-color var(--transition-fast, 0.15s ease), transform var(--transition-fast, 0.15s ease);
+}
+
+.doctor-appt-card:hover {
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.doctor-appt-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.doctor-appt-patient-name {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-main, #f8fafc);
+}
+
+.doctor-appt-patient-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted, #94a3b8);
+  margin-top: 0.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.doctor-appt-time-slot {
+  background: rgba(14, 165, 233, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: var(--radius-sm, 6px);
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.doctor-appt-details {
+  font-size: 0.82rem;
+  color: var(--text-dim, #64748b);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.doctor-appt-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
 }

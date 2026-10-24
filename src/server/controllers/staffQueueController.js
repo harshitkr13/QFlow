@@ -89,10 +89,12 @@ export const searchPatients = async (req, res, next) => {
     }
 
     const cleanQuery = rawQuery.trim();
+    // Escape regex metacharacters to eliminate ReDoS and malformed regular expression crashes
+    const safeRegex = cleanQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const searchFilter = {
       $or: [
-        { phone: { $regex: `^${cleanQuery}`, $options: 'i' } },
-        { fullName: { $regex: cleanQuery, $options: 'i' } },
+        { phone: { $regex: `^${safeRegex}`, $options: 'i' } },
+        { fullName: { $regex: safeRegex, $options: 'i' } },
       ],
     };
 

@@ -207,9 +207,29 @@ export const createAppointment = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'appointmentDate must be in YYYY-MM-DD format' });
     }
 
+    const startMin = timeToMinutes(timeSlot.startTime);
+    const endMin = timeToMinutes(timeSlot.endTime);
+    if (startMin < 0 || endMin < 0 || startMin >= endMin) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid timeSlot format. Expected { startTime: "HH:mm", endTime: "HH:mm" } with startTime < endTime',
+      });
+    }
+
     const todayIST = getFormattedDateIST();
     if (appointmentDate < todayIST) {
       return res.status(400).json({ success: false, message: 'Booking appointments for past dates is not permitted' });
+    }
+
+    if (appointmentDate === todayIST) {
+      const currentTimeIST = getFormattedTimeIST();
+      const currentMin = timeToMinutes(currentTimeIST);
+      if (startMin <= currentMin) {
+        return res.status(400).json({
+          success: false,
+          message: 'Booking appointments for past time slots is not permitted',
+        });
+      }
     }
 
     // Verify Patient profile exists for user
@@ -222,10 +242,71 @@ export const createAppointment = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Patient profile not found for user account' });
     }
 
+    // Check if patient already has an active appointment at the exact same date and time
+    const existingPatientAppt = await Appointment.findOne({
+      patientId: patient._id,
+      appointmentDate,
+      'timeSlot.startTime': timeSlot.startTime,
+      status: { $in: ['BOOKED', 'CHECKED_IN'] },
+    });
+    if (existingPatientAppt) {
+      return res.status(409).json({
+        success: false,
+        message: 'You already have an active appointment scheduled for this date and time',
+      });
+    }
+
     // Verify Doctor & Clinic Active Status
     const doctor = await Doctor.findById(doctorId).populate('clinicId');
     if (!doctor || !doctor.clinicId || !doctor.clinicId.isActive) {
       return res.status(404).json({ success: false, message: 'Doctor or associated clinic not found or inactive' });
+    }
+
+    // Verify Doctor Schedule and requested time slot validity
+    const schedule = await DoctorSchedule.findOne({ doctorId: doctor._id, isActive: true });
+    if (!schedule || !schedule.weeklyHours || schedule.weeklyHours.length === 0) {
+      return res.status(400).json({ success: false, message: 'Doctor schedule is not configured' });
+    }
+
+    const [year, month, day] = appointmentDate.split('-').map(Number);
+    const targetDateObj = new Date(Date.UTC(year, month - 1, day));
+    const dayNames = [
+      'SUNDAY',
+      'MONDAY',
+      'TUESDAY',
+      'WEDNESDAY',
+      'THURSDAY',
+      'FRIDAY',
+      'SATURDAY',
+    ];
+    const dayOfWeek = dayNames[targetDateObj.getUTCDay()];
+    const daySchedule = schedule.weeklyHours.find((h) => h.dayOfWeek === dayOfWeek);
+
+    if (
+      !daySchedule ||
+      !daySchedule.isWorkingDay ||
+      !daySchedule.shifts ||
+      daySchedule.shifts.length === 0
+    ) {
+      return res.status(400).json({ success: false, message: 'Doctor does not work on this day' });
+    }
+
+    const duration = doctor.averageConsultationDurationMinutes || 15;
+    if (endMin - startMin !== duration) {
+      return res.status(400).json({
+        success: false,
+        message: `Time slot duration must match doctor consultation duration (${duration} minutes)`,
+      });
+    }
+
+    const isSlotInShift = daySchedule.shifts.some((shift) =>
+      isTimeInShiftAndNotBreak(startMin, duration, shift, daySchedule.breaks || [])
+    );
+    if (!isSlotInShift) {
+      return res.status(400).json({
+        success: false,
+        message: 'Selected time slot is outside doctor working shifts or falls in a break',
+      });
     }
 
     // Create Appointment with status BOOKED
@@ -288,7 +369,7 @@ export const getMyAppointments = async (req, res, next) => {
     if (date) filter.appointmentDate = date;
 
     const appointments = await Appointment.find(filter)
-      .populate('doctorId', 'fullName photoUrl consultationFee')
+      .populate('doctorId', 'fullName photoUrl consultationFee clinicId specialtyId averageConsultationDurationMinutes')
       .populate('clinicId', 'name address phone')
       .populate('specialtyId', 'name')
       .sort({ appointmentDate: -1, 'timeSlot.startTime': 1 });
@@ -311,7 +392,7 @@ export const getMyAppointments = async (req, res, next) => {
 export const getAppointmentById = async (req, res, next) => {
   try {
     const appointment = await Appointment.findById(req.params.id)
-      .populate('patientId', 'fullName phone gender')
+      .populate('patientId', 'fullName phone gender dateOfBirth')
       .populate('doctorId', 'fullName photoUrl consultationFee')
       .populate('clinicId', 'name address phone')
       .populate('specialtyId', 'name');
@@ -328,7 +409,10 @@ export const getAppointmentById = async (req, res, next) => {
         return res.status(403).json({ success: false, message: 'Unauthorized to view this appointment' });
       }
     } else if (req.user.role === 'DOCTOR') {
-      const doctor = await Doctor.findOne({ userId });
+      let doctor = await Doctor.findOne({ userId });
+      if (!doctor && req.user.doctorId) {
+        doctor = await Doctor.findOne({ _id: req.user.doctorId });
+      }
       if (!doctor || !appointment.doctorId._id.equals(doctor._id)) {
         return res.status(403).json({ success: false, message: 'Unauthorized to view this appointment' });
       }
@@ -354,25 +438,54 @@ export const getAppointmentById = async (req, res, next) => {
  */
 export const getDoctorAppointments = async (req, res, next) => {
   try {
-    const userId = req.user._id || req.user.id;
-    const doctor = await Doctor.findOne({ userId });
+    let doctor = null;
+    if (req.user && req.user.doctorId) {
+      doctor = await Doctor.findById(req.user.doctorId);
+    }
+    if (!doctor) {
+      const userId = req.user._id || req.user.id;
+      doctor = await Doctor.findOne({ userId });
+    }
     if (!doctor) {
       return res.status(404).json({ success: false, message: 'Doctor profile not found' });
     }
 
-    const { date, status } = req.query;
+    const { date, status, scope } = req.query;
     const filter = { doctorId: doctor._id };
-    if (date) filter.appointmentDate = date;
+
+    if (date) {
+      filter.appointmentDate = date;
+    } else if (scope) {
+      const todayIST = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+      if (scope === 'today') {
+        filter.appointmentDate = todayIST;
+      } else if (scope === 'upcoming') {
+        filter.appointmentDate = { $gte: todayIST };
+      } else if (scope === 'past') {
+        filter.appointmentDate = { $lt: todayIST };
+      }
+    }
     if (status) filter.status = status;
+
+    const sortOrder = scope === 'past'
+      ? { appointmentDate: -1, 'timeSlot.startTime': -1 }
+      : { appointmentDate: 1, 'timeSlot.startTime': 1 };
 
     const appointments = await Appointment.find(filter)
       .populate('patientId', 'fullName phone gender dateOfBirth')
-      .sort({ appointmentDate: 1, 'timeSlot.startTime': 1 });
+      .populate('clinicId', 'name address phone')
+      .populate('specialtyId', 'name')
+      .sort(sortOrder);
 
     return res.status(200).json({
       success: true,
       count: appointments.length,
       appointments,
+      scope: scope || (date ? 'custom' : 'all'),
+      doctor: {
+        _id: doctor._id,
+        fullName: doctor.fullName,
+      },
     });
   } catch (error) {
     next(error);
@@ -404,8 +517,10 @@ export const getStaffAppointments = async (req, res, next) => {
     if (doctorId) filter.doctorId = doctorId;
 
     const appointments = await Appointment.find(filter)
-      .populate('patientId', 'fullName phone gender')
-      .populate('doctorId', 'fullName specialtyId')
+      .populate('patientId', 'fullName phone gender dateOfBirth')
+      .populate('doctorId', 'fullName specialtyId photoUrl')
+      .populate('specialtyId', 'name')
+      .populate('clinicId', 'name address phone')
       .sort({ appointmentDate: 1, 'timeSlot.startTime': 1 });
 
     return res.status(200).json({
@@ -453,10 +568,23 @@ export const cancelAppointment = async (req, res, next) => {
       if (!req.user.staffClinicId || apptClinicId !== req.user.staffClinicId.toString()) {
         return res.status(403).json({ success: false, message: 'Staff cannot cancel appointments outside assigned clinic' });
       }
+    } else if (req.user.role === 'DOCTOR') {
+      const userId = req.user._id || req.user.id;
+      let doctor = await Doctor.findOne({ userId });
+      if (!doctor && req.user.doctorId) {
+        doctor = await Doctor.findOne({ _id: req.user.doctorId });
+      }
+      const apptDoctorId = (appointment.doctorId._id || appointment.doctorId).toString();
+      if (!doctor || apptDoctorId !== doctor._id.toString()) {
+        return res.status(403).json({ success: false, message: 'Doctor cannot cancel appointments for other doctors' });
+      }
+    } else if (req.user.role !== 'ADMIN') {
+      return res.status(403).json({ success: false, message: 'Unauthorized role to cancel appointment' });
     }
 
     appointment.status = 'CANCELLED';
     appointment.cancellationReason = req.body.cancellationReason || 'Cancelled by user';
+    appointment.cancelledAt = new Date();
     await appointment.save();
 
     return res.status(200).json({

@@ -1,5 +1,5 @@
 import express from 'express';
-import { createClinic, updateClinic } from '../controllers/clinicController.js';
+import { createClinic, updateClinic, getClinics, getStaffListAdmin } from '../controllers/clinicController.js';
 import { createSpecialty, updateSpecialty } from '../controllers/specialtyController.js';
 import { onboardDoctor, updateDoctorAdmin } from '../controllers/doctorController.js';
 import { updateScheduleAdmin } from '../controllers/scheduleController.js';
@@ -14,11 +14,13 @@ const router = express.Router();
 router.use(protect);
 router.use(authorize('ADMIN'));
 
-// Clinic management
+// Clinic & Staff management
+router.get('/clinics', getClinics);
 router.post('/clinics', createClinic);
 router.patch('/clinics/:id', updateClinic);
 router.get('/clinics/:id/policy', getClinicPolicy);
 router.patch('/clinics/:id/policy', updateClinicPolicy);
+router.get('/staff', getStaffListAdmin);
 
 // Specialty management
 router.post('/specialties', createSpecialty);

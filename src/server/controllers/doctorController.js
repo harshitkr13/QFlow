@@ -250,6 +250,29 @@ export const discoverDoctors = async (req, res, next) => {
     const totalCount = result.metadata.length > 0 ? result.metadata[0].totalCount : 0;
     const totalPages = Math.ceil(totalCount / limitNum) || 1;
 
+    // Populate active schedule working days efficiently
+    const doctorIds = (result.data || []).map((d) => d._id);
+    if (doctorIds.length > 0) {
+      const schedules = await DoctorSchedule.find({
+        doctorId: { $in: doctorIds },
+        isActive: true,
+      }).select('doctorId weeklyHours');
+
+      const scheduleMap = new Map();
+      for (const s of schedules) {
+        const workingDays = (s.weeklyHours || [])
+          .filter((d) => d.isWorkingDay && Array.isArray(d.shifts) && d.shifts.length > 0)
+          .map((d) => d.dayOfWeek);
+        scheduleMap.set(s.doctorId.toString(), workingDays);
+      }
+
+      for (const doc of result.data) {
+        const days = scheduleMap.get(doc._id.toString());
+        doc.workingDays = days && days.length > 0 ? days : [];
+        doc.hasSchedule = Boolean(days && days.length > 0);
+      }
+    }
+
     return res.status(200).json({
       success: true,
       count: result.data.length,
@@ -429,10 +452,33 @@ export const getDoctors = async (req, res, next) => {
       .populate('specialtyId', 'name code description iconName')
       .sort({ fullName: 1 });
 
+    const docIds = doctors.map((d) => d._id);
+    const schedules = await DoctorSchedule.find({ doctorId: { $in: docIds }, isActive: true });
+    const scheduleMap = new Map();
+    for (const s of schedules) {
+      const workingDays = (s.weeklyHours || [])
+        .filter((d) => d.isWorkingDay && Array.isArray(d.shifts) && d.shifts.length > 0)
+        .map((d) => d.dayOfWeek);
+      scheduleMap.set(s.doctorId.toString(), {
+        workingDays,
+        scheduleId: s._id,
+        weeklyHours: s.weeklyHours,
+      });
+    }
+
+    const doctorsWithSchedule = doctors.map((d) => {
+      const docObj = d.toObject();
+      const sched = scheduleMap.get(d._id.toString());
+      docObj.workingDays = sched ? sched.workingDays : [];
+      docObj.hasSchedule = Boolean(sched && sched.workingDays.length > 0);
+      docObj.schedule = sched ? sched.weeklyHours : [];
+      return docObj;
+    });
+
     return res.status(200).json({
       success: true,
-      count: doctors.length,
-      doctors,
+      count: doctorsWithSchedule.length,
+      doctors: doctorsWithSchedule,
     });
   } catch (error) {
     next(error);
@@ -475,6 +521,17 @@ export const getDoctorById = async (req, res, next) => {
         clinic: doctor.clinicId,
         specialty: doctor.specialtyId,
         schedule: schedule ? schedule.weeklyHours : [],
+        workingDays: schedule
+          ? (schedule.weeklyHours || [])
+              .filter((d) => d.isWorkingDay && Array.isArray(d.shifts) && d.shifts.length > 0)
+              .map((d) => d.dayOfWeek)
+          : [],
+        hasSchedule: Boolean(
+          schedule &&
+            (schedule.weeklyHours || []).some(
+              (d) => d.isWorkingDay && Array.isArray(d.shifts) && d.shifts.length > 0
+            )
+        ),
       },
     });
   } catch (error) {

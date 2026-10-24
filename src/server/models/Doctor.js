@@ -48,6 +48,10 @@ const doctorSchema = new mongoose.Schema(
       default: 15,
       min: 1,
     },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
     operationalStatus: {
       type: String,
       enum: ['AVAILABLE', 'BUSY', 'ON_BREAK', 'UNAVAILABLE', 'OFFLINE'],

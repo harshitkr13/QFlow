@@ -11,6 +11,7 @@ import {
 } from '../controllers/appointmentController.js';
 import {
   getDoctorSchedule,
+  getDoctorScheduleSelf,
   updateScheduleSelf,
 } from '../controllers/scheduleController.js';
 import {
@@ -27,6 +28,7 @@ router.get('/discover', discoverDoctors);
 // Public / Protected doctor endpoints
 router.get('/', getDoctors);
 router.patch('/me', protect, authorize('DOCTOR'), updateDoctorSelf);
+router.get('/me/schedule', protect, authorize('DOCTOR'), getDoctorScheduleSelf);
 router.put('/me/schedule', protect, authorize('DOCTOR'), updateScheduleSelf);
 router.patch('/me/status', protect, authorize('DOCTOR'), updateStatusSelf);
 router.get('/me/appointments', protect, authorize('DOCTOR'), getDoctorAppointments);
