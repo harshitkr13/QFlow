@@ -3,7 +3,7 @@ services:
     name: qflow-backend-staging
     runtime: node
     plan: free
-    region: oregon
+    region: singapore
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/health
