@@ -13,7 +13,11 @@ const getFormattedDateIST = (dateObj = new Date()) => {
  */
 export const getPublicQueueDisplay = async (req, res, next) => {
   try {
-    const { clinicId, doctorId } = req.query;
+    const rawClinicId = req.query.clinicId;
+    const rawDoctorId = req.query.doctorId;
+
+    const clinicId = typeof rawClinicId === 'string' ? rawClinicId.trim() : rawClinicId;
+    const doctorId = typeof rawDoctorId === 'string' ? rawDoctorId.trim() : rawDoctorId;
 
     if (!clinicId || !mongoose.Types.ObjectId.isValid(clinicId)) {
       return res.status(400).json({ success: false, message: 'Valid clinicId query parameter is required' });
@@ -25,7 +29,7 @@ export const getPublicQueueDisplay = async (req, res, next) => {
     }
 
     let doctor = null;
-    if (doctorId) {
+    if (doctorId && doctorId !== 'null' && doctorId !== 'undefined') {
       if (!mongoose.Types.ObjectId.isValid(doctorId)) {
         return res.status(400).json({ success: false, message: 'Invalid doctorId format' });
       }
@@ -34,27 +38,29 @@ export const getPublicQueueDisplay = async (req, res, next) => {
         return res.status(404).json({ success: false, message: 'Doctor not found or does not belong to this clinic' });
       }
     } else {
-      doctor = await Doctor.findOne({ clinicId: clinic._id });
-    }
-
-    if (!doctor) {
-      return res.status(404).json({ success: false, message: 'No active doctor found for this clinic display' });
+      doctor = (await Doctor.findOne({ clinicId: clinic._id, isActive: true })) || (await Doctor.findOne({ clinicId: clinic._id }));
     }
 
     const todayIST = getFormattedDateIST();
 
-    const isQueuePaused = Boolean(doctor.isQueuePaused && doctor.queuePausedDate === todayIST);
+    const isQueuePaused = Boolean(doctor && doctor.isQueuePaused && doctor.queuePausedDate === todayIST);
     const queuePauseReason = isQueuePaused ? (doctor.queuePauseReason || 'Doctor queue paused') : null;
 
-    // Serving patient token
+    // Serving patient token filter
+    const activeServingFilter = {
+      clinicId: clinic._id,
+      queueDate: todayIST,
+      status: { $in: ['CALLED', 'IN_CONSULTATION'] },
+    };
+    if (doctorId && doctorId !== 'null' && doctorId !== 'undefined' && doctor) {
+      activeServingFilter.doctorId = doctor._id;
+    }
+
     let currentServingToken = null;
     let servingState = 'IDLE';
 
-    const activeServingEntry = await QueueEntry.findOne({
-      doctorId: doctor._id,
-      queueDate: todayIST,
-      status: { $in: ['CALLED', 'IN_CONSULTATION'] },
-    }).sort({ status: -1 }); // IN_CONSULTATION before CALLED
+    const activeServingEntry = await QueueEntry.findOne(activeServingFilter)
+      .sort({ status: -1, updatedAt: -1 }); // IN_CONSULTATION before CALLED
 
     if (activeServingEntry) {
       currentServingToken = activeServingEntry.tokenNumber;
@@ -67,12 +73,17 @@ export const getPublicQueueDisplay = async (req, res, next) => {
       calledToken = activeServingEntry.tokenNumber;
     }
 
-    // Waiting queue tokens ordered by HYBRID queue ordering
-    const waitingEntries = await QueueEntry.find({
-      doctorId: doctor._id,
+    // Waiting queue tokens filter
+    const waitingFilter = {
+      clinicId: clinic._id,
       queueDate: todayIST,
       status: 'WAITING',
-    })
+    };
+    if (doctorId && doctorId !== 'null' && doctorId !== 'undefined' && doctor) {
+      waitingFilter.doctorId = doctor._id;
+    }
+
+    const waitingEntries = await QueueEntry.find(waitingFilter)
       .sort({
         priorityWeight: 1,
         effectiveSlotMinutes: 1,
@@ -87,13 +98,22 @@ export const getPublicQueueDisplay = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       clinicName: clinic.name,
-      doctor: {
-        _id: doctor._id,
-        fullName: doctor.fullName,
-        operationalStatus: doctor.operationalStatus,
-        isQueuePaused,
-        queuePauseReason,
-      },
+      currentServingToken,
+      servingState,
+      calledToken,
+      totalWaiting: totalWaitingCount,
+      totalWaitingCount,
+      nextWaitingTokens,
+      nextTokens: nextWaitingTokens,
+      doctor: doctor
+        ? {
+            _id: doctor._id,
+            fullName: doctor.fullName,
+            operationalStatus: doctor.operationalStatus,
+            isQueuePaused,
+            queuePauseReason,
+          }
+        : null,
       display: {
         currentServingToken,
         servingState,

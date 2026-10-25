@@ -2214,6 +2214,15 @@ export default function App() {
   }, [receptionDoctorId, doctors]);
 
   useEffect(() => {
+    if (!publicClinicId && doctors.length > 0) {
+      const defaultClinicId = doctors[0]?.clinicId?._id || doctors[0]?.clinicId;
+      if (defaultClinicId) {
+        setPublicClinicId(defaultClinicId.toString());
+      }
+    }
+  }, [publicClinicId, doctors]);
+
+  useEffect(() => {
     if (viewTab === 'governance' && adminToken) {
       if (adminSubTab === 'policy') loadClinicPolicy();
       if (adminSubTab === 'queue_audit') loadQueueAuditLogs(1);
@@ -2241,8 +2250,9 @@ export default function App() {
   }, [viewTab, patientToken, isTabVisible, loadLiveQueue]);
 
   const loadPublicDisplay = useCallback(async () => {
-    if (!publicClinicId) return;
-    const res = await fetchPublicQueueDisplay(publicClinicId);
+    const cleanId = publicClinicId?.trim();
+    if (!cleanId) return;
+    const res = await fetchPublicQueueDisplay(cleanId);
     if (res.ok && res.data) {
       setPublicDisplayData(res.data);
     }
@@ -4777,52 +4787,93 @@ export default function App() {
             </div>
           </div>
 
-          {publicDisplayData ? (
-            <div>
-              <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>Active Clinic Station</span>
-                <h3 style={{ fontSize: '1.8rem', color: 'var(--primary-light)', margin: '0.25rem 0 0 0', fontWeight: 700 }}>
-                  {publicDisplayData.clinicName || 'Clinic Public Display'}
-                </h3>
-              </div>
+          {publicDisplayData ? (() => {
+            const publicServingToken =
+              publicDisplayData?.display?.currentServingToken ??
+              publicDisplayData?.currentServingToken ??
+              null;
+            const publicServingState =
+              publicDisplayData?.display?.servingState ??
+              publicDisplayData?.servingState ??
+              'IDLE';
+            const publicWaitingCount =
+              publicDisplayData?.display?.totalWaitingCount ??
+              publicDisplayData?.totalWaitingCount ??
+              publicDisplayData?.totalWaiting ??
+              0;
+            const publicNextTokens =
+              publicDisplayData?.display?.nextWaitingTokens ??
+              publicDisplayData?.nextWaitingTokens ??
+              publicDisplayData?.nextTokens ??
+              [];
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
-                {/* Now Serving Card */}
-                <div style={{ background: 'var(--surface-ground)', border: '2px solid rgba(14, 165, 233, 0.4)', borderRadius: 'var(--radius-xl)', padding: '2rem', textAlign: 'center', boxShadow: '0 0 30px -5px rgba(14, 165, 233, 0.2)' }}>
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: 'var(--primary-light)', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>
-                    <IconPulse />
-                    <span>Now Serving</span>
+            return (
+              <div>
+                <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>Active Clinic Station</span>
+                  <h3 style={{ fontSize: '1.8rem', color: 'var(--primary-light)', margin: '0.25rem 0 0 0', fontWeight: 700 }}>
+                    {publicDisplayData.clinicName || 'Clinic Public Display'}
+                  </h3>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+                  {/* Now Serving Card */}
+                  <div style={{ background: 'var(--surface-ground)', border: '2px solid rgba(14, 165, 233, 0.4)', borderRadius: 'var(--radius-xl)', padding: '2rem', textAlign: 'center', boxShadow: '0 0 30px -5px rgba(14, 165, 233, 0.2)' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: 'var(--primary-light)', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>
+                      <IconPulse />
+                      <span>Now Serving</span>
+                    </div>
+                    <div style={{ fontSize: '4.5rem', fontWeight: 900, color: '#ffffff', letterSpacing: '-0.03em', lineHeight: 1.1, margin: '0.5rem 0', textShadow: '0 0 30px rgba(56, 189, 248, 0.4)' }}>
+                      #{publicServingToken ? publicServingToken : 'IDLE'}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      {publicServingState === 'CALLED'
+                        ? 'Please proceed to designated exam room'
+                        : publicServingState === 'IN_CONSULTATION'
+                        ? 'Consultation currently in progress'
+                        : 'Exam rooms currently preparing'}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '4.5rem', fontWeight: 900, color: '#ffffff', letterSpacing: '-0.03em', lineHeight: 1.1, margin: '0.5rem 0', textShadow: '0 0 30px rgba(56, 189, 248, 0.4)' }}>
-                    #{publicDisplayData.currentServingToken || 'IDLE'}
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    {publicDisplayData.currentServingToken ? 'Please proceed to designated exam room' : 'Exam rooms currently preparing'}
+
+                  {/* Total Waiting Card */}
+                  <div style={{ background: 'var(--surface-ground)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '2rem', textAlign: 'center' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: '#fbbf24', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>
+                      <IconClock />
+                      <span>Waiting in Queue</span>
+                    </div>
+                    <div style={{ fontSize: '4.5rem', fontWeight: 900, color: '#fbbf24', letterSpacing: '-0.03em', lineHeight: 1.1, margin: '0.5rem 0' }}>
+                      {publicWaitingCount}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      Patients currently checked in today
+                    </div>
                   </div>
                 </div>
 
-                {/* Total Waiting Card */}
-                <div style={{ background: 'var(--surface-ground)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: '2rem', textAlign: 'center' }}>
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: '#fbbf24', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>
-                    <IconClock />
-                    <span>Waiting in Queue</span>
+                {/* Upcoming Waiting Tokens List */}
+                {publicNextTokens.length > 0 && (
+                  <div style={{ background: 'var(--surface-ground)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', padding: '1rem', marginBottom: '1.5rem', textAlign: 'center' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginRight: '0.75rem' }}>
+                      Next in Line:
+                    </span>
+                    <div style={{ display: 'inline-flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                      {publicNextTokens.map((tok) => (
+                        <span key={tok} style={{ background: 'rgba(251, 191, 36, 0.15)', border: '1px solid rgba(251, 191, 36, 0.3)', color: '#fbbf24', padding: '0.2rem 0.6rem', borderRadius: 'var(--radius-full)', fontWeight: 700, fontSize: '0.9rem' }}>
+                          #{tok}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '4.5rem', fontWeight: 900, color: '#fbbf24', letterSpacing: '-0.03em', lineHeight: 1.1, margin: '0.5rem 0' }}>
-                    {publicDisplayData.totalWaiting || 0}
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    Patients currently checked in today
-                  </div>
+                )}
+
+                {/* Kiosk Footer Notice */}
+                <div style={{ textAlign: 'center', padding: '1rem', background: 'var(--surface-elevated)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', color: 'var(--text-dim)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                  <IconShield />
+                  <span>Patient names are strictly masked to ensure compliance with medical confidentiality standards. Check token on your mobile pass.</span>
                 </div>
               </div>
-
-              {/* Kiosk Footer Notice */}
-              <div style={{ textAlign: 'center', padding: '1rem', background: 'var(--surface-elevated)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', color: 'var(--text-dim)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                <IconShield />
-                <span>Patient names are strictly masked to ensure compliance with medical confidentiality standards. Check token on your mobile pass.</span>
-              </div>
-            </div>
-          ) : (
+            );
+          })() : (
             <div className="empty-state-card" style={{ margin: '1rem auto' }}>
               <div className="empty-state-icon">
                 <IconActivity />
