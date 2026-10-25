@@ -109,14 +109,21 @@ export const startServer = async () => {
   // Validate runtime environment configuration before opening network listener
   validateEnvironment();
 
+  // Connect to database before accepting incoming HTTP requests
+  try {
+    await connectDB();
+  } catch (error) {
+    const sanitizedMessage = error.message
+      ? error.message.replace(/mongodb(?:\+srv)?:\/\/[^@]+@/i, 'mongodb+srv://<redacted>@')
+      : 'Connection error';
+    console.error('Failed to connect to MongoDB on server startup:', sanitizedMessage);
+    process.exit(1);
+  }
+
   const server = app.listen(PORT, () => {
     const routeCount = app._router?.stack?.filter((r) => r.route || r.name === 'router')?.length || 0;
     console.log(`QFlow Express Server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
     console.log(`Operational Security Active: Rate Limiting & Security Headers Enabled | Route Handlers: ${routeCount}`);
-  });
-
-  connectDB().catch((error) => {
-    console.error('Failed to connect to MongoDB on server startup:', error.message);
   });
 
   // Graceful Shutdown Sequence for SIGTERM & SIGINT

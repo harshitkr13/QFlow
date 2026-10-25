@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { validateEnvironment } from '../config/envValidator.js';
-import { isProtectedDatabase, parseDatabaseName } from '../config/db.js';
+import { isProtectedDatabase, parseDatabaseName, getEffectiveMongoUri } from '../config/db.js';
 import { resolveApiBaseUrl } from '../../client/src/services/api.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -264,6 +264,77 @@ async function main() {
     assert.strictEqual(isProtectedDatabase('qflow_test'), false);
     assert.strictEqual(isProtectedDatabase('other_db'), false);
     assert.strictEqual(isProtectedDatabase(null), false);
+  });
+
+  runTest('Runtime: getEffectiveMongoUri rejects protected DBs in test execution context', () => {
+    const origUri = process.env.MONGODB_URI;
+    const origTestUri = process.env.MONGODB_TEST_URI;
+    try {
+      delete process.env.MONGODB_TEST_URI;
+      process.env.MONGODB_URI = `${dummyCredsUri}/qflow_staging`;
+      assert.throws(
+        () => getEffectiveMongoUri(),
+        /FATAL: Automated test execution prohibited against protected database 'qflow_staging'/i
+      );
+
+      process.env.MONGODB_URI = `${dummyCredsUri}/qflow_prod`;
+      assert.throws(
+        () => getEffectiveMongoUri(),
+        /FATAL: Automated test execution prohibited against protected database 'qflow_prod'/i
+      );
+
+      process.env.MONGODB_URI = `${dummyCredsUri}/qflow`;
+      assert.throws(
+        () => getEffectiveMongoUri(),
+        /FATAL: Automated test execution prohibited against protected database 'qflow'/i
+      );
+    } finally {
+      if (origUri) process.env.MONGODB_URI = origUri; else delete process.env.MONGODB_URI;
+      if (origTestUri) process.env.MONGODB_TEST_URI = origTestUri; else delete process.env.MONGODB_TEST_URI;
+    }
+  });
+
+  runTest('Runtime: getEffectiveMongoUri calls validateEnvironment in normal runtime (fail-closed)', () => {
+    const origArgv = [...process.argv];
+    const origNodeEnv = process.env.NODE_ENV;
+    const origUri = process.env.MONGODB_URI;
+    const origJwt = process.env.JWT_SECRET;
+    try {
+      // Simulate normal application entry (e.g. node src/server/server.js)
+      process.argv = ['node', 'src/server/server.js'];
+      process.env.NODE_ENV = 'staging';
+      process.env.JWT_SECRET = validJwtSecret;
+
+      // Staging with wrong DB (qflow) must fail via validateEnvironment()
+      process.env.MONGODB_URI = `${dummyCredsUri}/qflow`;
+      assert.throws(
+        () => getEffectiveMongoUri(),
+        /FATAL ISOLATION VIOLATION.*Staging environment.*must strictly target database "qflow_staging"/i
+      );
+
+      // Staging with correct DB (qflow_staging) succeeds
+      process.env.MONGODB_URI = `${dummyCredsUri}/qflow_staging`;
+      const resolved = getEffectiveMongoUri();
+      assert.strictEqual(resolved, `${dummyCredsUri}/qflow_staging`);
+
+      // Production with wrong DB (qflow_staging) must fail via validateEnvironment()
+      process.env.NODE_ENV = 'production';
+      process.env.MONGODB_URI = `${dummyCredsUri}/qflow_staging`;
+      assert.throws(
+        () => getEffectiveMongoUri(),
+        /FATAL ISOLATION VIOLATION.*Production environment.*must strictly target database "qflow_prod"/i
+      );
+
+      // Production with correct DB (qflow_prod) succeeds
+      process.env.MONGODB_URI = `${dummyCredsUri}/qflow_prod`;
+      const resolvedProd = getEffectiveMongoUri();
+      assert.strictEqual(resolvedProd, `${dummyCredsUri}/qflow_prod`);
+    } finally {
+      process.argv = origArgv;
+      process.env.NODE_ENV = origNodeEnv;
+      if (origUri) process.env.MONGODB_URI = origUri; else delete process.env.MONGODB_URI;
+      if (origJwt) process.env.JWT_SECRET = origJwt; else delete process.env.JWT_SECRET;
+    }
   });
 
   // ============================================================================

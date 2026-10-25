@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import dns from 'dns';
+import { validateEnvironment } from './envValidator.js';
 
 // Configure DNS resolution for MongoDB Atlas SRV queries on environments where default system DNS rejects querySrv
 try {
@@ -94,10 +95,11 @@ export const getEffectiveMongoUri = () => {
     return candidateUri;
   }
 
-  // Production / Development application runtime
+  // Production / Staging / Development application runtime: strictly enforce environment database allowlist
+  validateEnvironment();
+
   const uri = process.env.MONGODB_URI;
   if (!uri) {
-    console.error('FATAL ERROR: MONGODB_URI is not defined in environment variables.');
     throw new Error('MONGODB_URI is not defined in environment configuration.');
   }
 
@@ -105,7 +107,7 @@ export const getEffectiveMongoUri = () => {
 };
 
 /**
- * Connect to MongoDB safely enforcing test-database isolation.
+ * Connect to MongoDB safely enforcing test-database isolation and environment validation.
  */
 export const connectDB = async () => {
   const uri = getEffectiveMongoUri();
@@ -115,7 +117,10 @@ export const connectDB = async () => {
     console.log(`MongoDB Connected: ${conn.connection.host}/${conn.connection.name}`);
     return conn;
   } catch (error) {
-    console.error(`MongoDB Connection Failure: ${error.message}`);
+    const sanitizedMessage = error.message
+      ? error.message.replace(/mongodb(?:\+srv)?:\/\/[^@]+@/i, 'mongodb+srv://<redacted>@')
+      : 'Connection error';
+    console.error(`MongoDB Connection Failure: ${sanitizedMessage}`);
     throw error;
   }
 };
