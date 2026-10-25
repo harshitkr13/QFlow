@@ -2859,8 +2859,12 @@ export default function App() {
                   Loading appointments...
                 </div>
               ) : (() => {
+                const TERMINAL_STATUSES = ['COMPLETED', 'CANCELLED', 'NO_SHOW', 'EXPIRED'];
                 const query = doctorApptSearch.toLowerCase().trim();
                 const filtered = doctorAppointments.filter((a) => {
+                  if (doctorApptScope === 'upcoming' && !doctorApptDate) {
+                    if (TERMINAL_STATUSES.includes(a.status)) return false;
+                  }
                   if (!query) return true;
                   const patientName = (a.patientId?.fullName || '').toLowerCase();
                   const patientPhone = (a.patientId?.phone || '').toLowerCase();

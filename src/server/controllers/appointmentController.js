@@ -453,19 +453,34 @@ export const getDoctorAppointments = async (req, res, next) => {
     const { date, status, scope } = req.query;
     const filter = { doctorId: doctor._id };
 
+    const TERMINAL_STATUSES = ['COMPLETED', 'CANCELLED', 'NO_SHOW', 'EXPIRED'];
+
     if (date) {
       filter.appointmentDate = date;
+      if (status) filter.status = status;
     } else if (scope) {
       const todayIST = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
       if (scope === 'today') {
         filter.appointmentDate = todayIST;
+        if (status) filter.status = status;
       } else if (scope === 'upcoming') {
         filter.appointmentDate = { $gte: todayIST };
+        if (status) {
+          if (TERMINAL_STATUSES.includes(status)) {
+            filter.status = { $in: [] };
+          } else {
+            filter.status = status;
+          }
+        } else {
+          filter.status = { $nin: TERMINAL_STATUSES };
+        }
       } else if (scope === 'past') {
         filter.appointmentDate = { $lt: todayIST };
+        if (status) filter.status = status;
       }
+    } else if (status) {
+      filter.status = status;
     }
-    if (status) filter.status = status;
 
     const sortOrder = scope === 'past'
       ? { appointmentDate: -1, 'timeSlot.startTime': -1 }
