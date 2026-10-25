@@ -12,12 +12,15 @@ import {
   QueueEntry,
   QueueCounter,
   Notification,
+  Appointment,
 } from '../models/index.js';
 import { formatDoctorName as serverFormatDoctorName } from '../utils/doctorUtils.js';
 import { formatDoctorName as clientFormatDoctorName } from '../../client/src/utils/doctorUtils.js';
 import { loginUser, getMe } from '../controllers/authController.js';
 import { protect } from '../middleware/authMiddleware.js';
 import { getTodayQueue, callNextPatient } from '../controllers/staffQueueController.js';
+import { getStaffListAdmin } from '../controllers/clinicController.js';
+import { getDoctorAppointments } from '../controllers/appointmentController.js';
 
 process.env.NODE_ENV = 'development';
 process.env.JWT_SECRET = 'test_jwt_staging_secret_key_1234567890';
@@ -112,6 +115,7 @@ async function main() {
       QueueEntry.init(),
       QueueCounter.init(),
       Notification.init(),
+      Appointment.init(),
     ]);
 
     // Seed test admin user for clinic
@@ -332,6 +336,106 @@ async function main() {
       'Notification must contain properly formatted doctor name "Dr. Alex Demo"'
     );
     console.log('✅ PASS: Call Next notification formats doctor name without duplicate title.');
+
+    // --------------------------------------------------------------------------
+    // TEST 6: GET /api/admin/staff returns populated staff profile name & mirrors to userId
+    // --------------------------------------------------------------------------
+    console.log('\n[TEST 6] Testing GET /api/admin/staff returns correct staff profile name...');
+    const adminReq = {
+      user: {
+        _id: adminUser._id,
+        role: 'ADMIN',
+      },
+      query: {},
+    };
+    const adminRes = createMockRes();
+    await getStaffListAdmin(adminReq, adminRes, (err) => { if (err) throw err; });
+
+    assert.strictEqual(adminRes.statusCode, 200);
+    assert.strictEqual(adminRes.body.success, true);
+    assert.ok(adminRes.body.staff.length > 0, 'Must return staff members');
+
+    const returnedStaff = adminRes.body.staff.find((s) => s.userId?.email === 'staff.staging@qflow.test');
+    assert.ok(returnedStaff, 'Target staff member must be in response');
+    assert.strictEqual(
+      returnedStaff.fullName,
+      'Staging Staff Receptionist',
+      'staff.fullName must contain the actual assigned staff profile name'
+    );
+    assert.strictEqual(
+      returnedStaff.userId?.fullName,
+      'Staging Staff Receptionist',
+      'staff.userId.fullName must mirror staff.fullName for data contract compatibility'
+    );
+    assert.strictEqual(
+      returnedStaff.phone,
+      '+91 98200 11223',
+      'staff.phone must match staff profile phone'
+    );
+    console.log('✅ PASS: Admin staff roster returns actual profile name and mirrors to userId.');
+
+    // --------------------------------------------------------------------------
+    // TEST 7: GET /api/doctors/me/appointments populates clinic name and code without [object Object]
+    // --------------------------------------------------------------------------
+    console.log('\n[TEST 7] Testing Doctor Consultations & Appointments clinic name rendering...');
+    const appointment = await Appointment.create({
+      clinicId: clinic._id,
+      doctorId: doctor._id,
+      patientId: patient._id,
+      specialtyId: specialty._id,
+      appointmentDate: today,
+      timeSlot: {
+        startTime: '10:00',
+        endTime: '10:15',
+      },
+      status: 'BOOKED',
+      consultationFee: 500,
+    });
+
+    const docApptReq = {
+      user: {
+        _id: doctorUser._id,
+        id: doctorUser._id,
+        doctorId: doctor._id,
+        role: 'DOCTOR',
+      },
+      query: {
+        scope: 'today',
+      },
+    };
+    const docApptRes = createMockRes();
+    await getDoctorAppointments(docApptReq, docApptRes, (err) => { if (err) throw err; });
+
+    assert.strictEqual(docApptRes.statusCode, 200);
+    assert.strictEqual(docApptRes.body.success, true);
+    assert.ok(docApptRes.body.appointments.length > 0, 'Must return doctor appointments');
+
+    const docAppt = docApptRes.body.appointments.find((a) => a._id.toString() === appointment._id.toString());
+    assert.ok(docAppt, 'Created appointment must be found');
+    assert.ok(docAppt.clinicId, 'clinicId must be populated');
+    assert.strictEqual(docAppt.clinicId.name, '[STAGING DEMO] Apex Community Clinic');
+    assert.strictEqual(typeof docAppt.clinicId.address, 'object', 'clinic address is an object');
+    assert.strictEqual(docAppt.clinicId.address.city, 'Mumbai', 'clinic address city is Mumbai');
+
+    // Simulate frontend safe rendering logic:
+    const code = docAppt.clinicId.code;
+    const city = typeof docAppt.clinicId.address === 'object'
+      ? (docAppt.clinicId.address?.city || docAppt.clinicId.address?.street)
+      : (typeof docAppt.clinicId.address === 'string' ? docAppt.clinicId.address : null);
+    const sub = code || city;
+    const renderedLabel = `${docAppt.clinicId.name}${sub ? ` (${sub})` : ''}`;
+
+    console.log(`  Rendered clinic label: "${renderedLabel}"`);
+    assert.strictEqual(
+      renderedLabel,
+      '[STAGING DEMO] Apex Community Clinic (Mumbai)',
+      'Clinic label must render human-readable name and location/code'
+    );
+    assert.ok(
+      !renderedLabel.includes('[object Object]'),
+      'Rendered clinic label must never contain [object Object]'
+    );
+    console.log('✅ PASS: Doctor appointments clinic label renders name and code without object coercion.');
 
     console.log('\n🎉 ALL TESTS PASSED SUCCESSFULLY! Both UI issues verified fixed.');
   } finally {

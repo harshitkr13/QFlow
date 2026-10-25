@@ -2932,7 +2932,17 @@ export default function App() {
 
                           <div className="doctor-appt-details">
                             {appt.clinicId && (
-                              <div>🏥 <strong>{appt.clinicId.name}</strong> {appt.clinicId.address ? `(${appt.clinicId.address})` : ''}</div>
+                              <div>
+                                🏥 <strong>{typeof appt.clinicId === 'object' ? (appt.clinicId.name || 'Assigned Clinic') : appt.clinicId}</strong>
+                                {typeof appt.clinicId === 'object' && (() => {
+                                  const code = appt.clinicId.code;
+                                  const city = typeof appt.clinicId.address === 'object'
+                                    ? (appt.clinicId.address?.city || appt.clinicId.address?.street)
+                                    : (typeof appt.clinicId.address === 'string' ? appt.clinicId.address : null);
+                                  const sub = code || city;
+                                  return sub ? ` (${sub})` : '';
+                                })()}
+                              </div>
                             )}
                             {appt.specialtyId && (
                               <div>🩺 Specialty: {appt.specialtyId.name}</div>
@@ -6079,7 +6089,7 @@ export default function App() {
                             .filter((s) => {
                               if (!adminRosterSearch.trim()) return true;
                               const q = adminRosterSearch.toLowerCase();
-                              return s.userId?.fullName?.toLowerCase().includes(q) || s.userId?.email?.toLowerCase().includes(q) || s.clinicId?.name?.toLowerCase().includes(q);
+                              return (s.fullName || s.userId?.fullName || '')?.toLowerCase().includes(q) || s.userId?.email?.toLowerCase().includes(q) || s.clinicId?.name?.toLowerCase().includes(q);
                             })
                             .map((staff) => {
                               const isActive = staff.userId?.isActive !== false && staff.isActive !== false;
@@ -6095,7 +6105,7 @@ export default function App() {
                                 >
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                                     <strong style={{ fontSize: '0.95rem', color: 'var(--text-main)' }}>
-                                      {staff.userId?.fullName || 'Staff Member'}
+                                      {staff.fullName || staff.userId?.fullName || 'Staff Member'}
                                     </strong>
                                     <span
                                       style={{
@@ -6111,7 +6121,7 @@ export default function App() {
                                     </span>
                                   </div>
                                   <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                                    Email: {staff.userId?.email || 'N/A'} | Phone: {staff.userId?.phone || 'N/A'}
+                                    Email: {staff.userId?.email || 'N/A'} | Phone: {staff.phone || staff.userId?.phone || 'N/A'}
                                   </div>
                                   <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
                                     Role: <strong>{staff.userId?.role || 'STAFF'}</strong> | Clinic: <strong style={{ color: 'var(--primary)' }}>{staff.clinicId?.name || 'Unassigned'}</strong>

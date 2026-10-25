@@ -473,7 +473,7 @@ export const getDoctorAppointments = async (req, res, next) => {
 
     const appointments = await Appointment.find(filter)
       .populate('patientId', 'fullName phone gender dateOfBirth')
-      .populate('clinicId', 'name address phone')
+      .populate('clinicId', 'name code address phone')
       .populate('specialtyId', 'name')
       .sort(sortOrder);
 

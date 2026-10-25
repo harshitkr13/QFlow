@@ -203,10 +203,18 @@ export const getStaffListAdmin = async (req, res, next) => {
     const filter = {};
     if (clinicId) filter.clinicId = clinicId;
 
-    const staff = await Staff.find(filter)
-      .populate('userId', 'fullName email phone role isActive')
-      .populate('clinicId', 'name city isActive code')
+    const staffList = await Staff.find(filter)
+      .populate('userId', 'email phone role isActive')
+      .populate('clinicId', 'name address isActive code')
       .sort({ createdAt: -1 });
+
+    const staff = staffList.map((s) => {
+      const staffObj = s.toObject();
+      if (staffObj.userId && !staffObj.userId.fullName) {
+        staffObj.userId.fullName = staffObj.fullName;
+      }
+      return staffObj;
+    });
 
     return res.status(200).json({
       success: true,
