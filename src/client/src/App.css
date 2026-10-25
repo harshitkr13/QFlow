@@ -135,7 +135,7 @@
 }
 
 .profile-trigger-btn:focus-visible {
-  outline: 2px solid var(--accent-cyan);
+  outline: 2px solid var(--primary-light);
   outline-offset: 2px;
 }
 
@@ -197,7 +197,7 @@
 .profile-dropdown-role {
   font-size: 0.68rem;
   font-weight: 700;
-  color: var(--accent-cyan);
+  color: var(--primary-light);
   letter-spacing: 0.04em;
   margin-top: 0.25rem;
   text-transform: uppercase;
@@ -224,14 +224,13 @@
   width: 28px;
   height: 28px;
   border-radius: var(--radius-full);
-  background: linear-gradient(135deg, var(--brand-amethyst-dark), var(--brand-amethyst));
+  background: linear-gradient(135deg, #0369a1, #0284c7);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 0.75rem;
   font-weight: 700;
   color: #fff;
-  border: 1px solid rgba(0, 229, 255, 0.3);
 }
 
 .user-info-text {
@@ -343,15 +342,15 @@
 }
 
 .nav-tab-btn:focus-visible {
-  outline: 2px solid var(--accent-cyan);
+  outline: 2px solid var(--primary-light);
   outline-offset: 2px;
 }
 
 .nav-tab-btn.active {
   color: #fff;
-  background: var(--brand-amethyst);
-  border-color: rgba(0, 229, 255, 0.45);
-  box-shadow: 0 0 12px -2px rgba(59, 10, 107, 0.5);
+  background: rgba(14, 165, 233, 0.15);
+  border-color: rgba(56, 189, 248, 0.4);
+  box-shadow: 0 0 12px -2px rgba(14, 165, 233, 0.25);
   font-weight: 600;
 }
 
@@ -548,10 +547,10 @@
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  background: rgba(10, 6, 18, 0.88);
+  background: rgba(13, 19, 34, 0.82);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 0.45rem 0.85rem;
   border-radius: var(--radius-full);
   font-size: 0.875rem; /* Standard 14px comfortable reading scale */
@@ -565,9 +564,9 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent-cyan);
+  background: var(--primary-light);
   flex-shrink: 0;
-  box-shadow: 0 0 6px var(--accent-cyan);
+  box-shadow: 0 0 6px var(--primary-light);
 }
 
 .caption-text {
@@ -1244,48 +1243,47 @@
 }
 
 .btn:focus-visible {
-  outline: 2px solid var(--accent-cyan);
+  outline: 2px solid var(--primary-light);
   outline-offset: 2px;
 }
 
-/* 1. Primary Variant — Royal Amethyst with subtle Cyan highlight */
+/* 1. Primary Variant — Clinical Precision Cyan/Blue */
 .btn-primary {
-  background: var(--brand-amethyst);
-  color: #ffffff;
-  border-color: rgba(0, 229, 255, 0.35);
-  box-shadow: 0 2px 8px -2px rgba(59, 10, 107, 0.6);
+  background: var(--primary-gradient);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 2px 10px -2px rgba(14, 165, 233, 0.4);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--brand-amethyst-light);
-  border-color: var(--accent-cyan);
-  box-shadow: 0 4px 14px -2px rgba(0, 229, 255, 0.22);
-  color: #ffffff;
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  box-shadow: 0 4px 16px -2px rgba(14, 165, 233, 0.6);
+  color: #fff;
 }
 
 /* 2. Secondary Variant — Elevated neutral surface with subtle border */
 .btn-secondary {
-  background: var(--surface-elevated);
+  background: var(--surface-ground);
   border-color: var(--border-default);
   color: var(--text-main);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #2a184a;
+  background: var(--surface-elevated);
   border-color: var(--border-hover);
-  color: #ffffff;
+  color: #fff;
 }
 
-/* 3. Outline Variant — Transparent ground with Electric Cyan stroke */
+/* 3. Outline Variant — Transparent ground with Clinical Cyan/Blue stroke */
 .btn-outline {
   background: transparent;
-  border-color: var(--accent-cyan);
-  color: var(--accent-cyan);
+  border-color: var(--primary-light);
+  color: var(--primary-light);
 }
 
 .btn-outline:hover:not(:disabled) {
-  background: rgba(0, 229, 255, 0.08);
-  border-color: var(--accent-cyan-light);
+  background: rgba(14, 165, 233, 0.1);
+  border-color: var(--primary-light);
   color: #ffffff;
 }
 
@@ -1297,21 +1295,21 @@
 }
 
 .btn-ghost:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.05);
   color: var(--text-main);
 }
 
 /* 5. Danger Variant — High-contrast destructive action with crisp affordance */
 .btn-danger {
-  background: rgba(239, 68, 68, 0.16);
-  border-color: rgba(239, 68, 68, 0.5);
-  color: #fecaca;
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
 }
 
 .btn-danger:hover:not(:disabled) {
   background: #dc2626;
-  border-color: #ef4444;
-  color: #ffffff;
+  border-color: #dc2626;
+  color: #fff;
 }
 
 .btn-danger:focus-visible {
@@ -1334,15 +1332,17 @@
 }
 
 .btn-danger-subtle {
-  background: rgba(239, 68, 68, 0.16);
-  border-color: rgba(239, 68, 68, 0.5);
-  color: #fecaca;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+  transition: all var(--transition-fast, 0.15s ease);
 }
 
 .btn-danger-subtle:hover:not(:disabled) {
-  background: #dc2626;
+  background: rgba(239, 68, 68, 0.2);
   border-color: #ef4444;
-  color: #ffffff;
 }
 
 /* Skeleton Loading Shimmer */
@@ -1839,18 +1839,17 @@ tr:hover td {
 }
 
 .btn-danger-subtle {
-  background: rgba(239, 68, 68, 0.16);
-  color: #fecaca;
-  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.25);
   border-radius: var(--radius-sm, 4px);
   cursor: pointer;
   transition: all var(--transition-fast, 0.15s ease);
 }
 
 .btn-danger-subtle:hover {
-  background: #dc2626;
+  background: rgba(239, 68, 68, 0.2);
   border-color: #ef4444;
-  color: #ffffff;
 }
 
 .admin-schedule-footer-bar {
