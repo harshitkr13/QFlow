@@ -6,6 +6,8 @@ import { Patient } from '../models/Patient.js';
 import { Doctor } from '../models/Doctor.js';
 import { Appointment } from '../models/Appointment.js';
 import { Notification } from '../models/Notification.js';
+import { Clinic } from '../models/Clinic.js';
+import { formatDoctorName } from '../utils/doctorUtils.js';
 
 /**
  * Helper: Format Date string to 'YYYY-MM-DD' in Asia/Kolkata (IST)
@@ -406,10 +408,27 @@ export const getTodayQueue = async (req, res, next) => {
       }
     }
 
+    let clinicInfo = null;
+    if (clinicId) {
+      if (req.user?.staffProfile?.clinicId?.name) {
+        clinicInfo = {
+          _id: req.user.staffProfile.clinicId._id,
+          name: req.user.staffProfile.clinicId.name,
+          code: req.user.staffProfile.clinicId.code,
+        };
+      } else {
+        const clinicDoc = await Clinic.findById(clinicId).select('name code address phone');
+        if (clinicDoc) {
+          clinicInfo = { _id: clinicDoc._id, name: clinicDoc.name, code: clinicDoc.code };
+        }
+      }
+    }
+
     return res.status(200).json({
       success: true,
       count: queueEntries.length,
       queueDate,
+      clinic: clinicInfo,
       doctorQueueStatus,
       doctorStatus: doctorQueueStatus,
       queue: queueEntries,
@@ -525,7 +544,7 @@ export const callNextPatient = async (req, res, next) => {
       queueEntry._id,
       'PATIENT_CALLED',
       'It is your turn!',
-      `Token #${queueEntry.tokenNumber} has been called for Dr. ${doctor.fullName}. Please proceed to the consultation room.`
+      `Token #${queueEntry.tokenNumber} has been called for ${formatDoctorName(doctor.fullName)}. Please proceed to the consultation room.`
     );
 
     return res.status(200).json({
@@ -1030,7 +1049,7 @@ export const pauseQueue = async (req, res, next) => {
         we._id,
         'QUEUE_PAUSED',
         'Queue Paused',
-        `Doctor ${doctor.fullName}'s queue is temporarily paused: ${doctor.queuePauseReason}`
+        `${formatDoctorName(doctor.fullName)}'s queue is temporarily paused: ${doctor.queuePauseReason}`
       );
     }
 
@@ -1454,7 +1473,7 @@ export const transferQueueDoctor = async (req, res, next) => {
       newState: entry.status,
       performedBy,
       userRole: req.user.role,
-      reason: `Transferred from Dr. ${currentDoctor.fullName} (Token #${oldTokenNumber}) to Dr. ${targetDoctor.fullName} (Token #${newTokenNumber}): ${reason.trim()}`,
+      reason: `Transferred from ${formatDoctorName(currentDoctor.fullName)} (Token #${oldTokenNumber}) to ${formatDoctorName(targetDoctor.fullName)} (Token #${newTokenNumber}): ${reason.trim()}`,
       timestamp: new Date(),
     });
 
@@ -1464,7 +1483,7 @@ export const transferQueueDoctor = async (req, res, next) => {
       entry._id,
       'QUEUE_TRANSFER',
       'Doctor Queue Transferred',
-      `Your queue has been transferred to Dr. ${targetDoctor.fullName}. Your new token is #${newTokenNumber}. Your original arrival seniority is preserved.`
+      `Your queue has been transferred to ${formatDoctorName(targetDoctor.fullName)}. Your new token is #${newTokenNumber}. Your original arrival seniority is preserved.`
     );
 
     return res.status(200).json({

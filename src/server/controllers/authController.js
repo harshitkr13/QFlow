@@ -127,22 +127,37 @@ export const loginUser = async (req, res, next) => {
     let doctorId = null;
     let staffId = null;
     let clinicId = null;
+    let fullName = null;
+    let clinic = null;
+    let profile = null;
 
     if (user.role === 'PATIENT') {
       const patient = await Patient.findOne({ userId: user._id });
-      if (patient) patientId = patient._id;
+      if (patient) {
+        patientId = patient._id;
+        fullName = patient.fullName;
+        profile = patient;
+      }
     } else if (user.role === 'DOCTOR') {
-      const doctor = await Doctor.findOne({ userId: user._id });
+      const doctor = await Doctor.findOne({ userId: user._id }).populate('clinicId', 'name code address phone');
       if (doctor) {
         doctorId = doctor._id;
-        clinicId = doctor.clinicId;
+        clinicId = doctor.clinicId?._id || doctor.clinicId;
+        clinic = doctor.clinicId?.name ? { _id: doctor.clinicId._id, name: doctor.clinicId.name, code: doctor.clinicId.code } : null;
+        fullName = doctor.fullName;
+        profile = doctor;
       }
     } else if (user.role === 'STAFF') {
-      const staff = await Staff.findOne({ userId: user._id });
+      const staff = await Staff.findOne({ userId: user._id }).populate('clinicId', 'name code address phone');
       if (staff) {
         staffId = staff._id;
-        clinicId = staff.clinicId;
+        clinicId = staff.clinicId?._id || staff.clinicId;
+        clinic = staff.clinicId?.name ? { _id: staff.clinicId._id, name: staff.clinicId.name, code: staff.clinicId.code } : null;
+        fullName = staff.fullName;
+        profile = staff;
       }
+    } else if (user.role === 'ADMIN') {
+      fullName = 'System Administrator';
     }
 
     const token = generateToken({ id: user._id, role: user.role });
@@ -155,10 +170,13 @@ export const loginUser = async (req, res, next) => {
         id: user._id,
         email: user.email,
         role: user.role,
+        fullName: fullName || user.email.split('@')[0],
         patientId,
         doctorId,
         staffId,
         clinicId,
+        clinic,
+        profile,
       },
     });
   } catch (error) {
@@ -173,18 +191,26 @@ export const loginUser = async (req, res, next) => {
  */
 export const getMe = async (req, res, next) => {
   try {
+    const profile = req.user.patientProfile || req.user.doctorProfile || req.user.staffProfile || null;
+    const fullName = profile?.fullName || (req.user.role === 'ADMIN' ? 'System Administrator' : req.user.email?.split('@')[0]);
+    const clinic = profile?.clinicId?.name
+      ? { _id: profile.clinicId._id, name: profile.clinicId.name, code: profile.clinicId.code }
+      : null;
+
     return res.status(200).json({
       success: true,
       user: {
         id: req.user._id,
         email: req.user.email,
         role: req.user.role,
+        fullName,
         isActive: req.user.isActive,
         patientId: req.user.patientId || null,
         doctorId: req.user.doctorId || null,
         staffId: req.user.staffId || null,
         staffClinicId: req.user.staffClinicId || null,
-        profile: req.user.patientProfile || req.user.doctorProfile || req.user.staffProfile || null,
+        clinic,
+        profile,
       },
     });
   } catch (error) {

@@ -610,6 +610,18 @@ export const fetchAdminIntelligenceSummary = async (token) => {
 };
 
 // Phase 13 Client API Helpers (Auth, Notifications & Doctor Workspace)
+export const fetchCurrentUser = async (token) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 0, error: error.message };
+  }
+};
+
 export const loginUser = async (credentials) => {
   try {
     const response = await fetch(`${API_BASE_URL}/auth/login`, {

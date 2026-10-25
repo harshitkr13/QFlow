@@ -46,16 +46,17 @@ export const protect = async (req, res, next) => {
         req.user.patientProfile = patient;
       }
     } else if (user.role === 'DOCTOR') {
-      const doctor = await Doctor.findOne({ userId: user._id });
+      const doctor = await Doctor.findOne({ userId: user._id }).populate('clinicId', 'name code address phone');
       if (doctor) {
         req.user.doctorId = doctor._id;
+        req.user.doctorClinicId = doctor.clinicId?._id || doctor.clinicId;
         req.user.doctorProfile = doctor;
       }
     } else if (user.role === 'STAFF') {
-      const staff = await Staff.findOne({ userId: user._id });
+      const staff = await Staff.findOne({ userId: user._id }).populate('clinicId', 'name code address phone');
       if (staff) {
         req.user.staffId = staff._id;
-        req.user.staffClinicId = staff.clinicId;
+        req.user.staffClinicId = staff.clinicId?._id || staff.clinicId;
         req.user.staffProfile = staff;
       }
     }

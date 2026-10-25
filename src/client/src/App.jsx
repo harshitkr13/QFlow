@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getTodayDateIST, formatWorkingDays } from './utils/dateUtils.js';
+import { formatDoctorName } from './utils/doctorUtils.js';
 import {
   fetchSpecialties,
   discoverDoctors,
@@ -40,6 +41,7 @@ import {
   fetchStaffAnomalies,
   fetchDoctorOwnIntelligence,
   fetchAdminIntelligenceSummary,
+  fetchCurrentUser,
   loginUser,
   registerUser,
   updateDoctorSelfStatus,
@@ -394,13 +396,13 @@ function DoctorDiscoveryCard({ doctor, onOpenProfile, onBookAppointment }) {
       : null;
 
   return (
-    <article className="doctor-card" aria-label={`Doctor profile for ${d.fullName}`}>
+    <article className="doctor-card" aria-label={`Doctor profile for ${formatDoctorName(d.fullName)}`}>
       <div className="doc-card-content">
         <header className="doc-card-top">
           <DoctorAvatar fullName={d.fullName} photoUrl={d.photoUrl} />
           <div className="doc-identity-block">
-            <h3 className="doc-name" title={d.fullName}>
-              {d.fullName}
+            <h3 className="doc-name" title={formatDoctorName(d.fullName)}>
+              {formatDoctorName(d.fullName)}
             </h3>
             <div className="doc-specialty-line">
               {d.specialty?.name || 'General Medicine'}
@@ -469,7 +471,7 @@ function DoctorDiscoveryCard({ doctor, onOpenProfile, onBookAppointment }) {
           type="button"
           className="btn btn-secondary doc-btn-profile"
           onClick={() => onOpenProfile(d._id)}
-          aria-label={`View full profile for ${d.fullName}`}
+          aria-label={`View full profile for ${formatDoctorName(d.fullName)}`}
         >
           View Profile
         </button>
@@ -477,7 +479,7 @@ function DoctorDiscoveryCard({ doctor, onOpenProfile, onBookAppointment }) {
           type="button"
           className="btn btn-primary doc-btn-book"
           onClick={() => onBookAppointment(d)}
-          aria-label={`Book consultation appointment with ${d.fullName}`}
+          aria-label={`Book consultation appointment with ${formatDoctorName(d.fullName)}`}
         >
           Book Consultation
         </button>
@@ -534,6 +536,10 @@ export default function App() {
   const currentRole = authSession?.user?.role || 'GUEST';
   const currentToken = authSession?.token || '';
 
+  const [staffClinicName, setStaffClinicName] = useState(() => {
+    return authSession?.user?.clinic?.name || authSession?.user?.profile?.clinicId?.name || '';
+  });
+
   const [patientToken, setPatientToken] = useState(currentRole === 'PATIENT' ? currentToken : '');
   const [staffToken, setStaffToken] = useState((currentRole === 'STAFF' || currentRole === 'ADMIN') ? currentToken : '');
   const [doctorToken, setDoctorToken] = useState(currentRole === 'DOCTOR' ? currentToken : '');
@@ -542,7 +548,7 @@ export default function App() {
   useEffect(() => {
     if (authSession?.token) {
       localStorage.setItem('qflow_auth_session', JSON.stringify(authSession));
-      const role = authSession.user.role;
+      const role = authSession.user?.role;
       if (role === 'PATIENT') setPatientToken(authSession.token);
       if (role === 'STAFF') setStaffToken(authSession.token);
       if (role === 'DOCTOR') setDoctorToken(authSession.token);
@@ -550,10 +556,35 @@ export default function App() {
         setAdminToken(authSession.token);
         setStaffToken(authSession.token);
       }
+      if (authSession.user?.clinic?.name) {
+        setStaffClinicName(authSession.user.clinic.name);
+      } else if (authSession.user?.profile?.clinicId?.name) {
+        setStaffClinicName(authSession.user.profile.clinicId.name);
+      }
+
+      // Proactively hydrate user details (clinic name, full name, profile) from /api/auth/me
+      fetchCurrentUser(authSession.token)
+        .then((res) => {
+          if (res.ok && res.data?.user) {
+            setAuthSession((prev) => {
+              if (!prev || !prev.token) return prev;
+              return {
+                ...prev,
+                user: {
+                  ...prev.user,
+                  ...res.data.user,
+                },
+              };
+            });
+            const cName = res.data.user?.clinic?.name || res.data.user?.profile?.clinicId?.name;
+            if (cName) setStaffClinicName(cName);
+          }
+        })
+        .catch(() => {});
     } else {
       localStorage.removeItem('qflow_auth_session');
     }
-  }, [authSession]);
+  }, [authSession?.token]);
 
   // Tab View Routing
   const [viewTab, setViewTab] = useState(() => {
@@ -1439,6 +1470,9 @@ export default function App() {
       setActiveEntries(active);
       setSkippedEntries(skipped);
       setTerminalEntries(terminal);
+      if (res.data.clinic?.name) {
+        setStaffClinicName(res.data.clinic.name);
+      }
       const docStatus = res.data.doctorQueueStatus || res.data.doctorStatus;
       if (docStatus) {
         setDoctorQueueStatus(docStatus);
@@ -1459,6 +1493,10 @@ export default function App() {
     const res = await fetchStaffAppointments(staffToken, params);
     if (res.ok && res.data?.appointments) {
       setStaffAppointments(res.data.appointments);
+      const apptClinic = res.data.appointments.find((a) => a.clinicId?.name)?.clinicId?.name;
+      if (apptClinic) {
+        setStaffClinicName(apptClinic);
+      }
     } else {
       setStaffApptError(res.data?.message || res.error || 'Failed to load clinic appointments');
     }
@@ -1663,7 +1701,7 @@ export default function App() {
       staffToken
     );
     if (res.ok) {
-      setReceptionMessage(`✓ Transferred Token #${transferModalEntry.tokenNumber} to Dr. ${res.data?.targetDoctor?.fullName || 'Doctor'} (New Token #${res.data?.newTokenNumber})`);
+      setReceptionMessage(`✓ Transferred Token #${transferModalEntry.tokenNumber} to ${formatDoctorName(res.data?.targetDoctor?.fullName)} (New Token #${res.data?.newTokenNumber})`);
       setTransferModalEntry(null);
       loadTodayStaffQueue();
     } else {
@@ -2087,7 +2125,7 @@ export default function App() {
     if (res.ok && res.data?.success) {
       setScheduleMessage({
         type: 'success',
-        text: `✓ Doctor schedule and consultation duration for Dr. ${selectedAdminDoctor.fullName} saved successfully!`,
+        text: `✓ Doctor schedule and consultation duration for ${formatDoctorName(selectedAdminDoctor?.fullName)} saved successfully!`,
       });
       await loadAdminDoctors();
     } else {
@@ -2302,6 +2340,9 @@ export default function App() {
       const res = await loginUser({ email: authForm.email, password: authForm.password });
       if (res.ok && res.data?.token) {
         setAuthSession({ user: res.data.user, token: res.data.token });
+        if (res.data.user?.clinic?.name) {
+          setStaffClinicName(res.data.user.clinic.name);
+        }
         setShowAuthModal(false);
       } else {
         setAuthError(res.data?.message || res.error || 'Login failed');
@@ -2941,7 +2982,7 @@ export default function App() {
                     ⏰ Recurring Practice Schedule & Consultation Duration
                   </h3>
                   <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                    {doctorProfileData?.fullName ? `Dr. ${doctorProfileData.fullName}` : 'My Account'} • Clinic: <strong>{doctorProfileData?.clinic?.name || 'Assigned Clinic'}</strong>
+                    {doctorProfileData?.fullName ? formatDoctorName(doctorProfileData.fullName) : 'My Account'} • Clinic: <strong>{doctorProfileData?.clinic?.name || doctorProfileData?.clinicId?.name || authSession?.user?.clinic?.name || 'Assigned Clinic'}</strong>
                   </div>
                 </div>
 
@@ -3559,10 +3600,10 @@ export default function App() {
                       >
                         <div>
                           <div style={{ fontWeight: 'bold', fontSize: '1.05rem', color: 'var(--text-main)' }}>
-                            Dr. {docObj.fullName || 'Doctor'}
+                            {formatDoctorName(docObj?.fullName)}
                           </div>
                           <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
-                            {appt.clinicId?.name || 'Assigned Clinic'} • {appt.specialtyId?.name || 'Specialty'}
+                            {appt.clinicId?.name || appt.clinic?.name || 'Assigned Clinic'} • {appt.specialtyId?.name || appt.specialty?.name || 'Specialty'}
                           </div>
                           <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
                             📅 <strong>{appt.appointmentDate}</strong> | ⏱️ <strong>{slotTime}</strong> | Status:{' '}
@@ -3699,11 +3740,17 @@ export default function App() {
               <div style={{ background: '#090d16', border: '1px solid var(--border)', borderRadius: '8px', padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Clinic: </span>
                 <strong style={{ color: 'var(--primary)' }}>
-                  {authSession?.user?.profile?.clinicId?.name || (doctors[0]?.clinicId?.name) || 'Assigned Clinic'}
+                  {authSession?.user?.clinic?.name ||
+                   authSession?.user?.profile?.clinicId?.name ||
+                   staffClinicName ||
+                   staffAppointments[0]?.clinicId?.name ||
+                   doctors[0]?.clinic?.name ||
+                   doctors[0]?.clinicId?.name ||
+                   'Assigned Clinic'}
                 </strong>
                 <span style={{ margin: '0 0.5rem', color: 'var(--border)' }}>|</span>
                 <span style={{ color: 'var(--text-muted)' }}>Operator: </span>
-                <strong>{authSession?.user?.fullName || 'Staff User'}</strong>
+                <strong>{authSession?.user?.fullName || authSession?.user?.profile?.fullName || 'Staff User'}</strong>
                 <span style={{ marginLeft: '0.35rem', fontSize: '0.75rem', padding: '0.15rem 0.4rem', borderRadius: '4px', background: 'var(--primary)', color: '#fff' }}>
                   {authSession?.user?.role || 'STAFF'}
                 </span>
@@ -3826,7 +3873,7 @@ export default function App() {
                     }}
                   >
                     {doctors.map((d) => (
-                      <option key={d._id} value={d._id}>Dr. {d.fullName} ({d.specialtyId?.name || 'Doctor'})</option>
+                      <option key={d._id} value={d._id}>{formatDoctorName(d.fullName)} ({d.specialtyId?.name || d.specialty?.name || 'Doctor'})</option>
                     ))}
                   </select>
                 </div>
@@ -3873,7 +3920,7 @@ export default function App() {
                           {entry.patientId?.fullName || 'Patient'}
                         </div>
                         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                          Phone: {entry.patientId?.phone || 'N/A'} | Doctor: Dr. {entry.doctorId?.fullName || 'Doctor'}
+                          Phone: {entry.patientId?.phone || 'N/A'} | Doctor: {formatDoctorName(entry.doctorId?.fullName)}
                         </div>
                         <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.65rem', flexWrap: 'wrap' }}>
                           <button
@@ -4159,7 +4206,7 @@ export default function App() {
                               Phone: {appt.patientId?.phone || 'N/A'} {appt.patientId?.gender ? `(${appt.patientId.gender})` : ''}
                             </div>
                             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: '0.4rem' }}>
-                              Doctor: <strong>Dr. {appt.doctorId?.fullName || 'Doctor'}</strong> ({appt.specialtyId?.name || 'Specialty'})
+                              Doctor: <strong>{formatDoctorName(appt.doctorId?.fullName)}</strong> ({appt.specialtyId?.name || appt.specialty?.name || 'Specialty'})
                             </div>
                           </div>
 
@@ -4410,7 +4457,7 @@ export default function App() {
                         onChange={(e) => setReceptionDoctorId(e.target.value)}
                       >
                         {doctors.map((d) => (
-                          <option key={d._id} value={d._id}>Dr. {d.fullName} ({d.specialtyId?.name || 'Doctor'})</option>
+                          <option key={d._id} value={d._id}>{formatDoctorName(d.fullName)} ({d.specialtyId?.name || d.specialty?.name || 'Doctor'})</option>
                         ))}
                       </select>
                     </div>
@@ -4495,7 +4542,7 @@ export default function App() {
                     {doctors
                       .filter((d) => d._id !== (transferModalEntry.doctorId?._id || transferModalEntry.doctorId))
                       .map((d) => (
-                        <option key={d._id} value={d._id}>Dr. {d.fullName} ({d.specialtyId?.name || 'Doctor'})</option>
+                        <option key={d._id} value={d._id}>{formatDoctorName(d.fullName)} ({d.specialtyId?.name || d.specialty?.name || 'Doctor'})</option>
                       ))}
                   </select>
                 </div>
@@ -4633,7 +4680,7 @@ export default function App() {
                   </p>
                   <ul style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.25rem', fontSize: '0.85rem' }}>
                     {settlementPreview.activeConsultations?.map((ac) => (
-                      <li key={ac._id}>Token #{ac.tokenNumber} with Dr. {ac.doctorName} (Patient: {ac.patientName})</li>
+                      <li key={ac._id}>Token #{ac.tokenNumber} with {formatDoctorName(ac.doctorName)} (Patient: {ac.patientName})</li>
                     ))}
                   </ul>
                 </div>
@@ -5304,7 +5351,7 @@ export default function App() {
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.25rem' }}>
                               <div style={{ fontWeight: 600, fontSize: '0.9rem', color: isSelected ? 'var(--primary-light)' : 'var(--text-main)' }}>
-                                Dr. {doc.fullName}
+                                {formatDoctorName(doc.fullName)}
                               </div>
                               <div style={{ display: 'flex', gap: '0.25rem' }}>
                                 {!isDoctorActive && (
@@ -5358,7 +5405,7 @@ export default function App() {
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                             <h4 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--text-main)' }}>
-                              Dr. {selectedAdminDoctor.fullName}
+                              {formatDoctorName(selectedAdminDoctor.fullName)}
                             </h4>
                             <span className="badge badge-primary" style={{ fontSize: '0.72rem' }}>
                               {selectedAdminDoctor.specialtyId?.name || 'General'}
@@ -5637,7 +5684,7 @@ export default function App() {
                           onClick={handleSaveSchedule}
                           disabled={scheduleSaving}
                         >
-                          {scheduleSaving ? '💾 Saving Schedule...' : `💾 Save Schedule for Dr. ${selectedAdminDoctor.fullName}`}
+                          {scheduleSaving ? '💾 Saving Schedule...' : `💾 Save Schedule for ${formatDoctorName(selectedAdminDoctor.fullName)}`}
                         </button>
                         <button
                           type="button"
@@ -5977,7 +6024,7 @@ export default function App() {
                               }}
                             >
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                <strong style={{ fontSize: '0.95rem', color: 'var(--text-main)' }}>Dr. {doc.fullName}</strong>
+                                <strong style={{ fontSize: '0.95rem', color: 'var(--text-main)' }}>{formatDoctorName(doc.fullName)}</strong>
                                 <span
                                   style={{
                                     fontSize: '0.7rem',
@@ -5992,7 +6039,7 @@ export default function App() {
                                 </span>
                               </div>
                               <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                                Specialty: <strong>{doc.specialtyId?.name || 'General'}</strong> | Clinic: {doc.clinicId?.name || 'Assigned Clinic'}
+                                Specialty: <strong>{doc.specialtyId?.name || 'General'}</strong> | Clinic: {doc.clinicId?.name || doc.clinic?.name || 'Assigned Clinic'}
                               </div>
                               <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
                                 Consultation Duration: <strong>{doc.averageConsultationDurationMinutes || 15} min</strong>
@@ -6340,7 +6387,7 @@ export default function App() {
                 {profileData.fullName ? profileData.fullName.replace(/^Dr\.?\s*/i, '').split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() : 'DR'}
               </div>
               <div>
-                <h2 style={{ fontSize: '1.3rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>Dr. {profileData.fullName}</h2>
+                <h2 style={{ fontSize: '1.3rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>{formatDoctorName(profileData.fullName)}</h2>
                 <span className="doc-specialty-badge">{profileData.specialty?.name || 'General Practice'}</span>
               </div>
             </div>
@@ -6366,7 +6413,7 @@ export default function App() {
             <button className="modal-close" onClick={() => setBookingDoctor(null)}>×</button>
             <h2 style={{ fontSize: '1.3rem', fontWeight: 700, margin: '0 0 0.5rem 0' }}>Book Consultation Slot</h2>
             <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
-              Select your appointment date and preferred consultation time with <strong>Dr. {bookingDoctor.fullName}</strong>.
+              Select your appointment date and preferred consultation time with <strong>{formatDoctorName(bookingDoctor.fullName)}</strong>.
               {bookingDoctor.workingDays && bookingDoctor.workingDays.length > 0 && (
                 <div style={{ marginTop: '0.35rem', color: 'var(--primary-light)', fontSize: '0.8rem' }}>
                   Weekly Working Days: <strong>{formatWorkingDays(bookingDoctor.workingDays)}</strong>
@@ -6520,7 +6567,7 @@ export default function App() {
             <div style={{ background: 'var(--surface-ground)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: '1rem', textAlign: 'left', marginBottom: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.55rem', fontSize: '0.88rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.45rem' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Doctor:</span>
-                <strong style={{ color: 'var(--text-main)' }}>Dr. {bookingSuccess.doctorName}</strong>
+                <strong style={{ color: 'var(--text-main)' }}>{formatDoctorName(bookingSuccess.doctorName)}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.45rem' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Clinic:</span>
