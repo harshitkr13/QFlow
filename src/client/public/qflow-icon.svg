@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">QFlow icon</title>
+  <desc id="desc">Blue healthcare app icon with a white pulse waveform.</desc>
+  <defs>
+    <linearGradient id="bg" x1="12" y1="8" x2="116" y2="124" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#72C7FF"/>
+      <stop offset="0.48" stop-color="#4298F3"/>
+      <stop offset="1" stop-color="#2865D9"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="22" y1="12" x2="92" y2="102" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#06142E" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="7" y="7" width="114" height="114" rx="31" fill="url(#bg)"/>
+    <path d="M38 8h52c17 0 30 13 30 30v13C92 43 67 29 38 8Z" fill="url(#shine)"/>
+    <path d="M25 66h20l10-20 14 39 12-27 7 8h15" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="101" cy="66" r="3.5" fill="#BFF9E8"/>
+  </g>
+</svg>

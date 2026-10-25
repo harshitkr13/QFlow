@@ -2376,7 +2376,13 @@ export default function App() {
         <div className="header-inner">
           <div className="brand-group" onClick={() => setViewTab('discover')}>
             <div className="brand-icon-wrapper">
-              <IconPulse />
+              <img
+                src="/qflow-icon.svg"
+                alt="QFlow"
+                className="brand-icon-img"
+                width="38"
+                height="38"
+              />
             </div>
             <div className="brand-text-block">
               <div className="brand-title">QFlow</div>
