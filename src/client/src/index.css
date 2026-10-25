@@ -1,37 +1,56 @@
 :root {
-  /* Design Tokens — Premium Healthcare SaaS System */
+  /* Design Tokens — QFlow Precision Healthcare System */
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   
-  /* Canvas & Ground */
-  --bg-base: #06090f;
-  --bg-subtle: #0a0f19;
-  --surface-ground: #0d1322;
-  --surface-card: #111a2e;
-  --surface-card-hover: #16223b;
-  --surface-elevated: #1a2845;
-  --surface-glass: rgba(13, 19, 34, 0.75);
+  /* Brand Palette (Strictly Enforced) */
+  --color-jet-black: #050505;
+  --color-royal-amethyst: #3b0a6b;
+  --color-electric-cyan: #00e5ff;
+
+  /* Canvas & Ground Surfaces (Jet Black Foundation) */
+  --bg-base: #050505;
+  --bg-subtle: #0a0612;
+  --surface-ground: #10081d;
+  --surface-card: #150c26;
+  --surface-card-hover: #1c1033;
+  --surface-elevated: #241442;
+  --surface-glass: rgba(16, 8, 29, 0.85);
   --surface-glass-border: rgba(255, 255, 255, 0.08);
 
-  /* Primary Brand — Clinical Precision Cyan/Blue */
-  --primary: #0284c7;
-  --primary-light: #38bdf8;
-  --primary-hover: #0369a1;
-  --primary-glow: rgba(56, 189, 248, 0.18);
-  --primary-subtle: rgba(14, 165, 233, 0.1);
-  --primary-gradient: linear-gradient(135deg, #0284c7 0%, #0ea5e9 50%, #38bdf8 100%);
+  /* Brand Colors — Royal Amethyst */
+  --brand-amethyst: #3b0a6b;
+  --brand-amethyst-light: #521294;
+  --brand-amethyst-dark: #270647;
+  --brand-amethyst-subtle: rgba(59, 10, 107, 0.25);
+
+  /* Interactive Accent — Electric Cyan */
+  --accent-cyan: #00e5ff;
+  --accent-cyan-light: #5df2ff;
+  --accent-cyan-hover: #00bcd4;
+  --accent-cyan-subtle: rgba(0, 229, 255, 0.12);
+  --accent-cyan-glow: rgba(0, 229, 255, 0.22);
+
+  /* Semantic Theme Mappings (Unified Token System) */
+  --primary: #3b0a6b;
+  --primary-light: #00e5ff;
+  --primary-hover: #521294;
+  --primary-glow: rgba(0, 229, 255, 0.18);
+  --primary-subtle: rgba(59, 10, 107, 0.25);
+  --primary-gradient: linear-gradient(135deg, #3b0a6b 0%, #521294 100%);
+  --accent-gradient: linear-gradient(135deg, #00e5ff 0%, #00bcd4 100%);
 
   /* Neutrals & Text */
   --text-main: #f8fafc;
   --text-secondary: #cbd5e1;
   --text-muted: #94a3b8;
   --text-dim: #64748b;
-  --text-brand: #38bdf8;
+  --text-brand: #00e5ff;
 
   /* Borders */
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-default: rgba(255, 255, 255, 0.1);
-  --border-hover: rgba(56, 189, 248, 0.35);
-  --border-focus: rgba(56, 189, 248, 0.6);
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-default: rgba(255, 255, 255, 0.12);
+  --border-hover: rgba(0, 229, 255, 0.4);
+  --border-focus: #00e5ff;
 
   /* Status Colors */
   --status-success: #10b981;
@@ -46,24 +65,24 @@
   --status-danger-bg: rgba(239, 68, 68, 0.12);
   --status-danger-border: rgba(239, 68, 68, 0.28);
 
-  --status-info: #0ea5e9;
-  --status-info-bg: rgba(14, 165, 233, 0.12);
-  --status-info-border: rgba(14, 165, 233, 0.28);
+  --status-info: #00e5ff;
+  --status-info-bg: rgba(0, 229, 255, 0.12);
+  --status-info-border: rgba(0, 229, 255, 0.28);
 
-  /* Elevation Shadows */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.6);
-  --shadow-card: 0 8px 24px -4px rgba(0, 0, 0, 0.45);
-  --glow-primary: 0 0 24px -2px rgba(56, 189, 248, 0.22);
+  /* Elevation Shadows (Restrained, healthcare-grade) */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.7);
+  --shadow-card: 0 8px 24px -4px rgba(0, 0, 0, 0.55);
+  --glow-primary: 0 0 18px -2px rgba(0, 229, 255, 0.15);
 
   /* Radii */
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 10px;
-  --radius-lg: 16px;
-  --radius-xl: 22px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
   --radius-full: 9999px;
 
   /* Transitions */
@@ -95,10 +114,25 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-image: 
-    radial-gradient(ellipse 90% 60% at 50% -15%, rgba(14, 165, 233, 0.12), transparent 70%),
-    radial-gradient(circle at 100% 10%, rgba(99, 102, 241, 0.06), transparent 35%),
-    radial-gradient(circle at 0% 30%, rgba(13, 148, 136, 0.05), transparent 40%);
+    radial-gradient(ellipse 90% 60% at 50% -15%, rgba(59, 10, 107, 0.22), transparent 70%),
+    radial-gradient(circle at 100% 10%, rgba(0, 229, 255, 0.05), transparent 35%);
   background-attachment: fixed;
+}
+
+/* Accessible Global Focus Indicator */
+:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+/* Reduced Motion Preference Support */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Custom Scrollbar */
@@ -112,12 +146,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: #241442;
   border-radius: var(--radius-full);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: #3b0a6b;
 }
 
 /* Base interactive elements */
@@ -126,17 +160,17 @@ button, input, select, textarea {
 }
 
 a {
-  color: var(--primary-light);
+  color: var(--accent-cyan);
   text-decoration: none;
   transition: color var(--transition-fast);
 }
 
 a:hover {
-  color: #7dd3fc;
+  color: var(--accent-cyan-light);
 }
 
 /* Selection */
 ::selection {
-  background: rgba(56, 189, 248, 0.3);
+  background: rgba(0, 229, 255, 0.25);
   color: #fff;
 }

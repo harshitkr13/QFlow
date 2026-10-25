@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { getTodayDateIST, formatWorkingDays } from './utils/dateUtils.js';
 import { formatDoctorName } from './utils/doctorUtils.js';
 import {
@@ -155,6 +155,49 @@ const IconPause = () => (
 const IconPlay = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
     <polygon points="5 3 19 12 5 21 5 3" />
+  </svg>
+);
+
+const IconChevronDown = ({ className = '' }) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+    <polyline points="6 9 12 15 18 9" />
+  </svg>
+);
+
+const IconRefresh = ({ className = '' }) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+    <polyline points="23 4 23 10 17 10" />
+    <polyline points="1 20 1 14 7 14" />
+    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+  </svg>
+);
+
+const IconClose = ({ className = '' }) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
+
+const IconCheck = ({ className = '' }) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+const IconLogout = ({ className = '' }) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <polyline points="16 17 21 12 16 7" />
+    <line x1="21" y1="12" x2="9" y2="12" />
+  </svg>
+);
+
+const IconAlert = ({ className = '' }) => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+    <line x1="12" y1="9" x2="12" y2="13" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
   </svg>
 );
 
@@ -546,6 +589,31 @@ export default function App() {
   const [doctorToken, setDoctorToken] = useState(currentRole === 'DOCTOR' ? currentToken : '');
   const [adminToken, setAdminToken] = useState(currentRole === 'ADMIN' ? currentToken : '');
 
+  // Profile dropdown menu state & accessibility listeners
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
+        setIsProfileMenuOpen(false);
+      }
+    }
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        setIsProfileMenuOpen(false);
+      }
+    }
+    if (isProfileMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isProfileMenuOpen]);
+
   useEffect(() => {
     if (authSession?.token) {
       localStorage.setItem('qflow_auth_session', JSON.stringify(authSession));
@@ -761,7 +829,7 @@ export default function App() {
       });
       setDoctorScheduleWeeklyHours(merged);
     } else {
-      setDoctorScheduleMessage(`⚠️ ${res.data?.message || res.error || 'Failed to load schedule'}`);
+      setDoctorScheduleMessage(`Failed to load schedule: ${res.data?.message || res.error || 'Unknown error'}`);
     }
     setDoctorScheduleLoading(false);
   }, [doctorToken]);
@@ -773,7 +841,7 @@ export default function App() {
 
     const dur = parseInt(doctorScheduleDuration, 10);
     if (isNaN(dur) || dur < 1 || dur > 240) {
-      setDoctorScheduleMessage('⚠️ Consultation duration must be an integer between 1 and 240 minutes');
+      setDoctorScheduleMessage('Consultation duration must be an integer between 1 and 240 minutes');
       setDoctorScheduleSaving(false);
       return;
     }
@@ -785,12 +853,12 @@ export default function App() {
 
     const res = await updateDoctorScheduleSelf(payload, doctorToken);
     if (res.ok) {
-      setDoctorScheduleMessage('✅ Schedule and consultation duration updated successfully!');
+      setDoctorScheduleMessage('✓ Schedule and consultation duration updated successfully!');
       if (res.data?.doctor?.averageConsultationDurationMinutes) {
         setDoctorScheduleDuration(res.data.doctor.averageConsultationDurationMinutes);
       }
     } else {
-      setDoctorScheduleMessage(`⚠️ Error: ${res.data?.message || res.error || 'Failed to update schedule'}`);
+      setDoctorScheduleMessage(`Error: ${res.data?.message || res.error || 'Failed to update schedule'}`);
     }
     setDoctorScheduleSaving(false);
   };
@@ -959,7 +1027,7 @@ export default function App() {
     );
     if (res.ok) {
       setDoctorCancelModal({ isOpen: false, appointment: null, reason: '', loading: false, error: null });
-      setDoctorMessage('✅ Appointment successfully cancelled');
+      setDoctorMessage('✓ Appointment successfully cancelled');
       loadDoctorAppointments();
     } else {
       setDoctorCancelModal((prev) => ({
@@ -1512,7 +1580,7 @@ export default function App() {
     if (res.ok && res.data) {
       const qEntry = res.data.queueEntry;
       setAllocatedTokenCard(qEntry);
-      setReceptionMessage(`✅ Patient checked in successfully! Allocated Queue Token #${qEntry?.tokenNumber}`);
+      setReceptionMessage(`✓ Patient checked in successfully! Allocated Queue Token #${qEntry?.tokenNumber}`);
       loadStaffAppointments();
       const targetDocId = res.data.appointment?.doctorId || qEntry?.doctorId;
       if (targetDocId) {
@@ -1523,7 +1591,7 @@ export default function App() {
         loadTodayStaffQueue();
       }
     } else {
-      setReceptionMessage(`⚠️ Check-In Failed: ${res.data?.message || res.error || 'Check-in period not open or expired'}`);
+      setReceptionMessage(`Check-In Failed: ${res.data?.message || res.error || 'Check-in period not open or expired'}`);
     }
     setCheckInLoadingId(null);
   };
@@ -1534,10 +1602,10 @@ export default function App() {
     setReceptionMessage(null);
     const res = await rejoinPatient(queueEntryId, staffToken);
     if (res.ok && res.data?.queueEntry) {
-      setReceptionMessage(`✅ Patient rejoined queue with new Token #${res.data.queueEntry.tokenNumber}`);
+      setReceptionMessage(`✓ Patient rejoined queue with new Token #${res.data.queueEntry.tokenNumber}`);
       loadTodayStaffQueue();
     } else {
-      setReceptionMessage(`⚠️ Rejoin Failed: ${res.data?.message || res.error}`);
+      setReceptionMessage(`Rejoin Failed: ${res.data?.message || res.error}`);
     }
     setOpLoading(false);
   };
@@ -1550,10 +1618,10 @@ export default function App() {
     setReceptionMessage(null);
     const res = await cancelQueueEntry(id, reason.trim() || 'Cancelled at reception desk', staffToken);
     if (res.ok) {
-      setReceptionMessage('✅ Queue entry cancelled successfully');
+      setReceptionMessage('✓ Queue entry cancelled successfully');
       loadTodayStaffQueue();
     } else {
-      setReceptionMessage(`⚠️ Cancellation Failed: ${res.data?.message || res.error}`);
+      setReceptionMessage(`Cancellation Failed: ${res.data?.message || res.error}`);
     }
     setOpLoading(false);
   };
@@ -2405,7 +2473,7 @@ export default function App() {
                 <IconLocation />
               </div>
               <span style={{ fontSize: '0.78rem', color: coords ? 'var(--status-success)' : 'var(--text-muted)' }}>
-                {locLoading ? 'Locating...' : coords ? `📍 ${coords.latitude.toFixed(2)}, ${coords.longitude.toFixed(2)}` : 'Location'}
+                {locLoading ? 'Locating...' : coords ? `${coords.latitude.toFixed(2)}, ${coords.longitude.toFixed(2)}` : 'Location'}
               </span>
             </div>
 
@@ -2424,21 +2492,46 @@ export default function App() {
             )}
 
             {authSession?.user ? (
-              <div className="user-profile-badge">
-                <div className="user-avatar-circle">
-                  {(authSession.user.name || authSession.user.email || 'U')[0].toUpperCase()}
-                </div>
-                <div className="user-info-text">
-                  <div className="user-name-text">{authSession.user.name || authSession.user.email?.split('@')[0] || 'User'}</div>
-                  <div className="user-role-badge">{currentRole}</div>
-                </div>
+              <div className="profile-menu-container" ref={profileMenuRef}>
                 <button
-                  className="btn btn-ghost"
-                  style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', marginLeft: '0.25rem' }}
-                  onClick={handleLogout}
+                  type="button"
+                  className="user-profile-badge profile-trigger-btn"
+                  onClick={() => setIsProfileMenuOpen((prev) => !prev)}
+                  aria-expanded={isProfileMenuOpen}
+                  aria-haspopup="true"
+                  aria-label="User profile menu"
                 >
-                  Sign Out
+                  <div className="user-avatar-circle">
+                    {(authSession.user.name || authSession.user.email || 'U')[0].toUpperCase()}
+                  </div>
+                  <div className="user-info-text">
+                    <div className="user-name-text">{authSession.user.name || authSession.user.email?.split('@')[0] || 'User'}</div>
+                    <div className="user-role-badge">{currentRole}</div>
+                  </div>
+                  <IconChevronDown className={`profile-chevron ${isProfileMenuOpen ? 'open' : ''}`} />
                 </button>
+
+                {isProfileMenuOpen && (
+                  <div className="profile-dropdown-menu" role="menu">
+                    <div className="profile-dropdown-header">
+                      <div className="profile-dropdown-name">{authSession.user.name || 'User'}</div>
+                      <div className="profile-dropdown-email">{authSession.user.email}</div>
+                      <div className="profile-dropdown-role">{currentRole}</div>
+                    </div>
+                    <div className="profile-dropdown-divider" />
+                    <button
+                      type="button"
+                      className="btn btn-ghost profile-dropdown-action"
+                      role="menuitem"
+                      onClick={() => {
+                        setIsProfileMenuOpen(false);
+                        handleLogout();
+                      }}
+                    >
+                      <IconLogout /> Sign Out
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <button
@@ -2461,7 +2554,7 @@ export default function App() {
               className={`nav-tab-btn ${viewTab === 'discover' ? 'active' : ''}`}
               onClick={() => setViewTab('discover')}
             >
-              <IconSearch /> Find Specialists
+              Find Specialists
             </button>
           )}
 
@@ -2575,20 +2668,19 @@ export default function App() {
             }}
           >
             <div style={{ fontWeight: 'bold', fontSize: '1rem', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span>⚠️</span> Configuration Error
+              <IconAlert /> Configuration Error
             </div>
             <div style={{ fontSize: '0.875rem', lineHeight: '1.4' }}>{apiConfigError}</div>
           </div>
         )}
 
-      {/* VIEW: Doctor Examination Cockpit (Phase 13) */}
       {/* VIEW: Doctor Examination Cockpit & Workspace (Phase 5) */}
       {viewTab === 'doctor_cockpit' && (
         <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
           {/* Header & Sub-Tabs Navigation */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '1rem', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
             <div>
-              <h2 style={{ fontSize: '1.4rem', color: 'var(--primary)', margin: 0 }}>🩺 Doctor Clinical Workspace</h2>
+              <h1 className="page-heading">Doctor Clinical Workspace</h1>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                 Live exam room workflow, consultation records, and recurring practice schedule management
               </div>
@@ -2600,7 +2692,7 @@ export default function App() {
                 style={{ fontSize: '0.85rem' }}
                 onClick={() => setDoctorSubTab('queue')}
               >
-                🚪 Live Exam & Queue
+                Live Exam & Queue
               </button>
               <button
                 className={`btn ${doctorSubTab === 'appointments' ? 'btn-primary' : 'btn-secondary'}`}
@@ -2610,7 +2702,7 @@ export default function App() {
                   loadDoctorAppointments();
                 }}
               >
-                📅 Consultations & Appointments
+                Consultations & Appointments
               </button>
               <button
                 className={`btn ${doctorSubTab === 'schedule' ? 'btn-primary' : 'btn-secondary'}`}
@@ -2620,7 +2712,7 @@ export default function App() {
                   loadDoctorSelfSchedule();
                 }}
               >
-                ⏰ My Practice Schedule
+                My Practice Schedule
               </button>
             </div>
           </div>
@@ -2682,14 +2774,14 @@ export default function App() {
 
               {/* Active Examination Room Card */}
               <div style={{ background: '#090d16', padding: '1.25rem', borderRadius: '10px', border: '1px solid var(--border)', marginBottom: '1.5rem' }}>
-                <h3 style={{ fontSize: '1.1rem', color: '#f8fafc', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>🚪 Examination Room Status</span>
+                <h2 className="card-title" style={{ fontSize: '1.1rem', color: '#f8fafc', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Examination Room Status</span>
                   {doctorActivePatient && (
                     <span style={{ fontSize: '0.8rem', padding: '0.2rem 0.6rem', borderRadius: '999px', background: doctorActivePatient.status === 'IN_CONSULTATION' ? '#065f46' : '#854d0e', color: '#fff' }}>
                       {doctorActivePatient.status}
                     </span>
                   )}
-                </h3>
+                </h2>
 
                 {doctorActivePatient ? (
                   <div>
@@ -2717,12 +2809,12 @@ export default function App() {
                     <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                       {doctorActivePatient.status === 'CALLED' && (
                         <button className="btn btn-primary" disabled={doctorOpLoading} onClick={handleDoctorStartConsultation}>
-                          ▶ Start Consultation
+                          Start Consultation
                         </button>
                       )}
                       {doctorActivePatient.status === 'IN_CONSULTATION' && (
                         <button className="btn btn-primary" disabled={doctorOpLoading} onClick={handleDoctorCompleteConsultation}>
-                          ✓ Complete Consultation
+                          Complete Consultation
                         </button>
                       )}
                     </div>
@@ -2731,16 +2823,16 @@ export default function App() {
                   <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
                     <p>No patient is currently in the examination room.</p>
                     <button className="btn btn-primary" disabled={doctorOpLoading || doctorQueueData.length === 0} onClick={handleDoctorCallNext}>
-                      📢 Call Next Patient
+                      Call Next Patient
                     </button>
                   </div>
                 )}
               </div>
 
               {/* Today's Waiting Queue Table */}
-              <h3 style={{ fontSize: '1.1rem', color: '#f8fafc', marginBottom: '0.75rem' }}>
-                📋 Waiting Queue ({doctorQueueData.length})
-              </h3>
+              <h2 className="card-title" style={{ fontSize: '1.1rem', color: '#f8fafc', marginBottom: '0.75rem' }}>
+                Waiting Queue ({doctorQueueData.length})
+              </h2>
               {doctorQueueData.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)', background: '#090d16', borderRadius: '8px' }}>
                   No patients waiting in queue today.
@@ -2799,7 +2891,7 @@ export default function App() {
                       loadDoctorAppointments('today', '');
                     }}
                   >
-                    📅 Today
+                    Today
                   </button>
                   <button
                     type="button"
@@ -2811,7 +2903,7 @@ export default function App() {
                       loadDoctorAppointments('upcoming', '');
                     }}
                   >
-                    🔜 Upcoming
+                    Upcoming
                   </button>
                   <button
                     type="button"
@@ -2823,7 +2915,7 @@ export default function App() {
                       loadDoctorAppointments('past', '');
                     }}
                   >
-                    📜 Past & History
+                    Past & History
                   </button>
                 </div>
 
@@ -2864,14 +2956,14 @@ export default function App() {
                     onClick={() => loadDoctorAppointments()}
                     disabled={doctorApptLoading}
                   >
-                    {doctorApptLoading ? 'Refreshing...' : '🔄 Refresh'}
+                    {doctorApptLoading ? 'Refreshing...' : 'Refresh'}
                   </button>
                 </div>
               </div>
 
               {doctorApptError && (
                 <div style={{ background: '#450a0a', border: '1px solid #ef4444', color: '#fee2e2', padding: '0.75rem 1rem', borderRadius: '8px', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>⚠️ {doctorApptError}</span>
+                  <span>{doctorApptError}</span>
                   <button className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }} onClick={() => loadDoctorAppointments()}>
                     Retry
                   </button>
@@ -2942,7 +3034,7 @@ export default function App() {
                               <div className="doctor-appt-patient-meta">
                                 {patient?.gender && <span>{patient.gender}</span>}
                                 {age !== null && <span>• {age} yrs</span>}
-                                {patient?.phone && <span>• 📞 {patient.phone}</span>}
+                                {patient?.phone && <span>• {patient.phone}</span>}
                               </div>
                             </div>
                             <span className={`badge ${badgeClass}`} style={{ fontSize: '0.75rem' }}>
@@ -2952,17 +3044,17 @@ export default function App() {
 
                           <div className="doctor-appt-time-slot">
                             <span style={{ fontWeight: 600, color: 'var(--primary-light)' }}>
-                              🗓️ {appt.appointmentDate}
+                              Date: {appt.appointmentDate}
                             </span>
                             <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>
-                              ⏰ {appt.timeSlot?.startTime} – {appt.timeSlot?.endTime}
+                              Time: {appt.timeSlot?.startTime} – {appt.timeSlot?.endTime}
                             </span>
                           </div>
 
                           <div className="doctor-appt-details">
                             {appt.clinicId && (
                               <div>
-                                🏥 <strong>{typeof appt.clinicId === 'object' ? (appt.clinicId.name || 'Assigned Clinic') : appt.clinicId}</strong>
+                                Clinic: <strong>{typeof appt.clinicId === 'object' ? (appt.clinicId.name || 'Assigned Clinic') : appt.clinicId}</strong>
                                 {typeof appt.clinicId === 'object' && (() => {
                                   const code = appt.clinicId.code;
                                   const city = typeof appt.clinicId.address === 'object'
@@ -2974,7 +3066,7 @@ export default function App() {
                               </div>
                             )}
                             {appt.specialtyId && (
-                              <div>🩺 Specialty: {appt.specialtyId.name}</div>
+                              <div>Specialty: {appt.specialtyId.name}</div>
                             )}
                             <div style={{ fontSize: '0.75rem', opacity: 0.8 }}>
                               Ref: <code>#{appt._id}</code>
@@ -3017,9 +3109,9 @@ export default function App() {
               {/* Doctor Practice Header */}
               <div className="admin-doc-editor-header" style={{ marginBottom: '1.25rem' }}>
                 <div>
-                  <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '1.15rem' }}>
-                    ⏰ Recurring Practice Schedule & Consultation Duration
-                  </h3>
+                  <h2 className="card-title" style={{ margin: '0 0 0.35rem 0', fontSize: '1.15rem' }}>
+                    Recurring Practice Schedule & Consultation Duration
+                  </h2>
                   <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
                     {doctorProfileData?.fullName ? formatDoctorName(doctorProfileData.fullName) : 'My Account'} • Clinic: <strong>{doctorProfileData?.clinic?.name || doctorProfileData?.clinicId?.name || authSession?.user?.clinic?.name || 'Assigned Clinic'}</strong>
                   </div>
@@ -3047,7 +3139,7 @@ export default function App() {
               </div>
 
               {doctorScheduleMessage && (
-                <div style={{ background: doctorScheduleMessage.includes('✅') ? '#064e3b' : '#451a03', border: `1px solid ${doctorScheduleMessage.includes('✅') ? '#10b981' : '#f59e0b'}`, padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1.25rem', fontSize: '0.85rem' }}>
+                <div style={{ background: doctorScheduleMessage.includes('✓') ? '#064e3b' : '#451a03', border: `1px solid ${doctorScheduleMessage.includes('✓') ? '#10b981' : '#f59e0b'}`, padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1.25rem', fontSize: '0.85rem' }}>
                   {doctorScheduleMessage}
                 </div>
               )}
@@ -3064,7 +3156,7 @@ export default function App() {
                   onClick={handleDoctorApplyMonToFriPreset}
                   title="Set Mon-Fri 09:00-13:00 and 16:00-20:00"
                 >
-                  ⚡ Mon–Fri (Two Shifts: 9-1, 4-8)
+                  Mon–Fri (Two Shifts: 9–1, 4–8)
                 </button>
                 <button
                   type="button"
@@ -3073,7 +3165,7 @@ export default function App() {
                   onClick={handleDoctorApplySingleShiftPreset}
                   title="Set Mon-Sat 09:00-17:00 with 1h Lunch Break"
                 >
-                  ⚡ Mon–Sat (9-5 + Lunch)
+                  Mon–Sat (9–5 + Lunch)
                 </button>
                 <button
                   type="button"
@@ -3082,7 +3174,7 @@ export default function App() {
                   onClick={handleDoctorMarkAllOffDuty}
                   title="Set all days to off-duty"
                 >
-                  🚫 Mark All Off-Duty
+                  Mark All Off-Duty
                 </button>
                 <button
                   type="button"
@@ -3161,8 +3253,8 @@ export default function App() {
                               Working Shifts:
                             </div>
                             {(!dayObj.shifts || dayObj.shifts.length === 0) ? (
-                              <div style={{ fontSize: '0.75rem', color: '#f87171', fontStyle: 'italic' }}>
-                                ⚠️ Working day must have at least one shift
+                              <div style={{ fontSize: '0.75rem', color: '#f87171', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                <IconAlert /> Working day must have at least one shift
                               </div>
                             ) : (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
@@ -3264,7 +3356,7 @@ export default function App() {
                   onClick={handleDoctorScheduleSave}
                   disabled={doctorScheduleSaving}
                 >
-                  {doctorScheduleSaving ? 'Saving Schedule...' : '💾 Save Practice Schedule'}
+                  {doctorScheduleSaving ? 'Saving Schedule...' : 'Save Practice Schedule'}
                 </button>
                 <button
                   type="button"
@@ -3380,7 +3472,7 @@ export default function App() {
             {/* Specialties Filter Chips */}
             <div className="specialties-section">
               <div className="specialties-header">
-                <span>Browse By Clinical Specialty</span>
+                <span>Browse by clinical specialty</span>
                 {selectedSpecialty && (
                   <button
                     className="btn btn-ghost"
@@ -3415,18 +3507,18 @@ export default function App() {
               <div className="filter-group">
                 <label className="filter-label">Sort Priority</label>
                 <select className="filter-select" value={sort} onChange={(e) => setSort(e.target.value)}>
-                  <option value="rating">★ Highest Rated</option>
-                  <option value="experience">🎖 Most Experienced</option>
-                  {coords && <option value="nearest">📍 Nearest Distance</option>}
+                  <option value="rating">Highest Rated</option>
+                  <option value="experience">Most Experienced</option>
+                  {coords && <option value="nearest">Nearest Distance</option>}
                 </select>
               </div>
               <div className="filter-group">
                 <label className="filter-label">Minimum Rating</label>
                 <select className="filter-select" value={minRating} onChange={(e) => setMinRating(e.target.value)}>
                   <option value="">Any Rating</option>
-                  <option value="4.5">★ 4.5+ Stars</option>
-                  <option value="4.0">★ 4.0+ Stars</option>
-                  <option value="3.5">★ 3.5+ Stars</option>
+                  <option value="4.5">4.5+ Stars</option>
+                  <option value="4.0">4.0+ Stars</option>
+                  <option value="3.5">3.5+ Stars</option>
                 </select>
               </div>
               <div className="filter-group">
@@ -3539,23 +3631,23 @@ export default function App() {
       {/* VIEW: My Appointments (Patient) */}
       {viewTab === 'my_appointments' && (
         <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div className="section-header-bar">
             <div>
-              <h2 style={{ margin: 0 }}>📅 My Appointments</h2>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                Track your upcoming consultations, self-check-in upon arrival, or cancel and rebook slots.
+              <h1 className="page-heading">My Appointments</h1>
+              <div className="page-subheading">
+                Track your upcoming consultations, self-check in upon arrival, or cancel and rebook slots.
               </div>
             </div>
             {patientToken && (
               <button
-                className="btn btn-secondary"
-                style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}
+                type="button"
+                className="btn btn-secondary btn-sm"
                 onClick={() => {
                   setAppointmentMessage(null);
                   loadMyAppointments();
                 }}
               >
-                🔄 Refresh Appointments
+                <IconRefresh /> Refresh Appointments
               </button>
             )}
           </div>
@@ -3609,7 +3701,7 @@ export default function App() {
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
                     Discover our specialists and reserve consultation slots that suit your schedule.
                   </div>
-                  <button className="btn btn-primary" onClick={() => setViewTab('discovery')}>
+                  <button className="btn btn-primary" onClick={() => setViewTab('discover')}>
                     Find a Doctor & Book →
                   </button>
                 </div>
@@ -3645,7 +3737,7 @@ export default function App() {
                             {appt.clinicId?.name || appt.clinic?.name || 'Assigned Clinic'} • {appt.specialtyId?.name || appt.specialty?.name || 'Specialty'}
                           </div>
                           <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
-                            📅 <strong>{appt.appointmentDate}</strong> | ⏱️ <strong>{slotTime}</strong> | Status:{' '}
+                            Date: <strong>{appt.appointmentDate}</strong> | Time: <strong>{slotTime}</strong> | Status:{' '}
                             <span
                               className={`badge ${
                                 appt.status === 'BOOKED'
@@ -3673,36 +3765,37 @@ export default function App() {
                           )}
                         </div>
 
-                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div className="appt-action-group">
                           {appt.status === 'BOOKED' && (
                             <>
                               <button
-                                className="btn btn-primary"
+                                type="button"
+                                className="btn btn-primary btn-sm"
                                 disabled={selfCheckInLoading || isCancelling}
-                                style={{ fontSize: '0.85rem' }}
                                 onClick={() => handleSelfCheckIn(appt._id)}
                               >
-                                ✓ Check In Now (Get Token)
+                                <IconCheck /> Check In Now
                               </button>
                               <button
-                                className="btn btn-danger"
-                                style={{ fontSize: '0.85rem' }}
+                                type="button"
+                                className="btn btn-danger btn-sm"
                                 disabled={isCancelling || selfCheckInLoading}
                                 onClick={() => handleCancelAppointment(appt._id)}
+                                aria-label="Cancel scheduled appointment"
                               >
-                                {isCancelling ? 'Cancelling...' : 'Cancel'}
+                                <IconClose /> {isCancelling ? 'Cancelling...' : 'Cancel'}
                               </button>
                             </>
                           )}
                           {appt.status === 'CHECKED_IN' && (
-                            <button className="btn btn-secondary" style={{ fontSize: '0.85rem' }} onClick={() => setViewTab('live_queue')}>
+                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setViewTab('live_queue')}>
                               View Live Queue →
                             </button>
                           )}
                           {appt.status === 'CANCELLED' && (
                             <button
-                              className="btn btn-secondary"
-                              style={{ fontSize: '0.85rem' }}
+                              type="button"
+                              className="btn btn-secondary btn-sm"
                               onClick={() => {
                                 handleProceedToAppointment({
                                   _id: docObj._id || docObj,
@@ -3714,7 +3807,7 @@ export default function App() {
                                 });
                               }}
                             >
-                              ↺ Rebook Slot
+                              Rebook Slot
                             </button>
                           )}
                         </div>
@@ -3731,9 +3824,26 @@ export default function App() {
       {/* VIEW: Patient Live Queue Experience */}
       {viewTab === 'live_queue' && (
         <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
-          <h2>🎫 Patient Live Queue Tracker</h2>
+          <h1 className="page-heading">Live Queue Tracker</h1>
+          <div className="page-subheading">
+            Real-time queue positioning, estimated wait times, and current exam room serving tokens.
+          </div>
           {!liveQueueData || !liveQueueData.hasActiveQueueEntry ? (
-            <div className="empty-state">No active queue token for today. Book an appointment or check in at the clinic reception.</div>
+            <div className="empty-state" style={{ padding: '3.5rem 1.5rem', textAlign: 'center' }}>
+              <div style={{ fontSize: '1.15rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.4rem' }}>
+                No Active Queue Token
+              </div>
+              <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', maxWidth: '440px', margin: '0 auto 1.25rem auto', lineHeight: '1.5' }}>
+                You currently have no active queue position for today. Book a consultation with a specialist or check in at the clinic reception upon arrival.
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setViewTab('discover')}
+              >
+                Book Appointment
+              </button>
+            </div>
           ) : (
             <div style={{ textAlign: 'center', padding: '1.5rem', background: '#090d16', borderRadius: '12px', border: '1px solid var(--border)' }}>
               <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>YOUR QUEUE TOKEN</div>
@@ -3768,9 +3878,7 @@ export default function App() {
           {/* Reception Header & Clinic Context */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
             <div>
-              <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span>🏥</span> Staff Reception & Operations Desk
-              </h2>
+              <h1 className="page-heading">Reception & Operations Desk</h1>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
                 Clinic operational queue orchestration, appointment arrival check-in, and walk-in token allocation.
               </div>
@@ -3857,7 +3965,7 @@ export default function App() {
                 loadTodayStaffQueue();
               }}
             >
-              📋 Live Queue Operations
+              Live Queue Operations
             </button>
             <button
               type="button"
@@ -3868,7 +3976,7 @@ export default function App() {
                 loadStaffAppointments();
               }}
             >
-              🎫 Appointment Check-In
+              Appointment Check-In
             </button>
             <button
               type="button"
@@ -3876,7 +3984,7 @@ export default function App() {
               style={{ fontSize: '0.85rem' }}
               onClick={() => setReceptionSubTab('walkin')}
             >
-              🚶 Walk-In Registration
+              Walk-In Registration
             </button>
           </div>
 
@@ -3889,10 +3997,10 @@ export default function App() {
               {doctorQueueStatus?.isQueuePaused && (
                 <div style={{ background: '#451a03', border: '1px solid #f59e0b', color: '#fef3c7', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                   <div>
-                    <strong>⏸ Queue Currently Paused:</strong> {doctorQueueStatus.queuePauseReason || 'Doctor unavailable'}
+                    <strong>Queue Currently Paused:</strong> {doctorQueueStatus.queuePauseReason || 'Doctor unavailable'}
                   </div>
                   <button className="btn btn-primary" style={{ fontSize: '0.8rem', padding: '0.3rem 0.75rem' }} onClick={handleResumeQueue}>
-                    ▶ Resume Queue
+                    Resume Queue
                   </button>
                 </div>
               )}
@@ -3918,16 +4026,16 @@ export default function App() {
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   <button className="btn btn-primary" disabled={opLoading || !receptionDoctorId} onClick={handleCallNext}>
-                    📢 Call Next Patient
+                    Call Next Patient
                   </button>
                   <button className="btn btn-secondary" disabled={opLoading || !receptionDoctorId} onClick={handlePauseQueue}>
-                    ⏸ Pause Queue
+                    Pause Queue
                   </button>
                   <button className="btn btn-secondary" disabled={opLoading || !receptionDoctorId} onClick={handleResumeQueue}>
-                    ▶ Resume Queue
+                    Resume Queue
                   </button>
                   <button className="btn btn-secondary" onClick={() => loadTodayStaffQueue()}>
-                    🔄 Refresh Queue
+                    Refresh Queue
                   </button>
                 </div>
               </div>
@@ -3937,7 +4045,7 @@ export default function App() {
                 {/* Active Serving Card */}
                 <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                    <h4 style={{ margin: 0 }}>Currently Serving ({activeEntries.length})</h4>
+                    <h2 className="card-title" style={{ margin: 0, fontSize: '1rem' }}>Currently Serving ({activeEntries.length})</h2>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Doctor consultation in Cockpit</span>
                   </div>
                   {activeEntries.length === 0 ? (
@@ -3968,7 +4076,7 @@ export default function App() {
                             onClick={() => handleSkip(entry._id)}
                             title="Skip patient if absent when called"
                           >
-                            ⏭ Skip Patient
+                            Skip Patient
                           </button>
                           <button
                             className="btn btn-secondary"
@@ -3976,7 +4084,7 @@ export default function App() {
                             onClick={() => handleNoShow(entry._id)}
                             title="Mark patient as No-Show"
                           >
-                            🚫 Mark No-Show
+                            Mark No-Show
                           </button>
                           <button
                             className="btn btn-secondary"
@@ -3984,7 +4092,7 @@ export default function App() {
                             onClick={() => handleStaffCancelQueueEntry(entry._id)}
                             title="Cancel queue entry with reason"
                           >
-                            ❌ Cancel Entry
+                            Cancel Entry
                           </button>
                         </div>
                       </div>
@@ -3995,7 +4103,7 @@ export default function App() {
                 {/* Waiting Queue List */}
                 <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                    <h4 style={{ margin: 0 }}>Waiting in Queue ({waitingEntries.length})</h4>
+                    <h2 className="card-title" style={{ margin: 0, fontSize: '1rem' }}>Waiting in Queue ({waitingEntries.length})</h2>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Hybrid Priority Sort</span>
                   </div>
                   {waitingEntries.length === 0 ? (
@@ -4025,7 +4133,7 @@ export default function App() {
                             onClick={() => handleOpenTriage(entry)}
                             title="Escalate queue priority"
                           >
-                            ⚡ Triage
+                            Triage
                           </button>
                           <button
                             className="btn btn-secondary"
@@ -4033,7 +4141,7 @@ export default function App() {
                             onClick={() => handleOpenTransfer(entry)}
                             title="Transfer patient to another doctor"
                           >
-                            🔀 Transfer
+                            Transfer
                           </button>
                           <button
                             className="btn btn-secondary"
@@ -4053,9 +4161,9 @@ export default function App() {
               {/* Skipped Patients Recovery Card */}
               {skippedEntries.length > 0 && (
                 <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.5rem' }}>
-                  <h4 style={{ margin: '0 0 0.5rem 0', color: '#f59e0b' }}>
-                    ⏭ Skipped Patients ({skippedEntries.length}) — Ready to Rejoin
-                  </h4>
+                  <h2 className="card-title" style={{ margin: '0 0 0.5rem 0', color: '#f59e0b', fontSize: '1rem' }}>
+                    Skipped Patients ({skippedEntries.length}) — Ready to Rejoin
+                  </h2>
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
                     Patients who were absent when called can be rejoined to the waiting queue with a newly allocated token.
                   </p>
@@ -4072,7 +4180,7 @@ export default function App() {
                           onClick={() => handleStaffRejoinSkipped(entry._id)}
                           disabled={opLoading}
                         >
-                          🔁 Rejoin Queue
+                          Rejoin Queue
                         </button>
                       </div>
                     ))}
@@ -4083,9 +4191,9 @@ export default function App() {
               {/* Terminal Queue History for Today */}
               {terminalEntries.length > 0 && (
                 <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                  <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-muted)' }}>
-                    🏁 Terminal Queue Entries Today ({terminalEntries.length})
-                  </h4>
+                  <h2 className="card-title" style={{ margin: '0 0 0.5rem 0', color: 'var(--text-muted)', fontSize: '1rem' }}>
+                    Terminal Queue Entries Today ({terminalEntries.length})
+                  </h2>
                   <div style={{ maxHeight: '180px', overflowY: 'auto', fontSize: '0.8rem' }}>
                     {terminalEntries.map((entry) => (
                       <div key={entry._id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', borderBottom: '1px solid var(--border)' }}>
@@ -4114,7 +4222,7 @@ export default function App() {
             <div>
               {/* Check-In Header & Instructions */}
               <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.25rem' }}>
-                <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '1.1rem' }}>🎫 Clinic Appointment Arrival & Check-In</h3>
+                <h2 className="card-title" style={{ margin: '0 0 0.35rem 0', fontSize: '1.1rem' }}>Appointment Arrival & Check-In</h2>
                 <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                   Locate booked clinic appointments and check in patients upon clinic arrival. A live queue token is generated and allocated upon check-in.
                 </p>
@@ -4166,7 +4274,7 @@ export default function App() {
                     onClick={() => loadStaffAppointments()}
                     disabled={staffApptLoading}
                   >
-                    {staffApptLoading ? 'Refreshing...' : '🔄 Refresh Appointments'}
+                    {staffApptLoading ? 'Refreshing...' : 'Refresh Appointments'}
                   </button>
                 </div>
               </div>
@@ -4223,7 +4331,7 @@ export default function App() {
                           <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
                               <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: '#38bdf8' }}>
-                                ⏰ {appt.timeSlot?.startTime || '00:00'} – {appt.timeSlot?.endTime || '00:00'}
+                                Time: {appt.timeSlot?.startTime || '00:00'} – {appt.timeSlot?.endTime || '00:00'}
                               </span>
                               <span
                                 style={{
@@ -4257,12 +4365,12 @@ export default function App() {
                                 disabled={checkInLoadingId === appt._id}
                                 onClick={() => handleStaffCheckIn(appt._id)}
                               >
-                                {checkInLoadingId === appt._id ? 'Checking In...' : '🎫 Check In Patient & Allocate Token'}
+                                {checkInLoadingId === appt._id ? 'Checking In...' : 'Check In Patient & Allocate Token'}
                               </button>
                             )}
                             {isCheckedIn && (
                               <div style={{ textAlign: 'center', fontSize: '0.8rem', color: '#10b981', fontWeight: 600, padding: '0.35rem', background: '#064e3b', borderRadius: '4px' }}>
-                                ✓ Patient Checked In (In Queue)
+                                Patient Checked In (In Queue)
                               </div>
                             )}
                             {isCancelled && (
@@ -4286,7 +4394,7 @@ export default function App() {
           {receptionSubTab === 'walkin' && (
             <div>
               <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.25rem' }}>
-                <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '1.1rem' }}>🚶 Walk-In Patient Registration</h3>
+                <h2 className="card-title" style={{ margin: '0 0 0.35rem 0', fontSize: '1.1rem' }}>Walk-In Patient Registration</h2>
                 <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                   Search for an existing registered patient or create a new walk-in profile, then allocate a queue token directly.
                 </p>
@@ -4300,7 +4408,7 @@ export default function App() {
                   style={{ fontSize: '0.85rem' }}
                   onClick={() => setIsCreatingNewPatient(false)}
                 >
-                  🔍 Search Existing Patient
+                  Search Existing Patient
                 </button>
                 <button
                   type="button"
@@ -4308,14 +4416,14 @@ export default function App() {
                   style={{ fontSize: '0.85rem' }}
                   onClick={() => setIsCreatingNewPatient(true)}
                 >
-                  ➕ Register New Patient Profile
+                  Register New Patient Profile
                 </button>
               </div>
 
               {/* Mode A: Search Existing Patient */}
               {!isCreatingNewPatient && (
                 <div style={{ background: '#090d16', padding: '1.25rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.25rem' }}>
-                  <h4 style={{ margin: '0 0 0.75rem 0' }}>Search Registered Patients</h4>
+                  <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '0.95rem' }}>Search Registered Patients</h3>
                   <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                     <input
                       type="text"
@@ -4333,7 +4441,7 @@ export default function App() {
 
                   {searchResults.length > 0 && (
                     <div style={{ marginTop: '1rem' }}>
-                      <h5 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-muted)' }}>Matching Results ({searchResults.length})</h5>
+                      <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-muted)', fontSize: '0.85rem' }}>Matching Results ({searchResults.length})</h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                         {searchResults.map((p) => (
                           <div
@@ -4382,7 +4490,7 @@ export default function App() {
                     maxWidth: '600px',
                   }}
                 >
-                  <h4 style={{ margin: '0 0 0.75rem 0' }}>Register New Walk-In Patient Profile</h4>
+                  <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '0.95rem' }}>Register New Walk-In Patient Profile</h3>
 
                   {newPatientError && (
                     <div style={{ background: '#451a03', border: '1px solid #f59e0b', color: '#fef3c7', padding: '0.6rem', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.85rem' }}>
@@ -4462,7 +4570,7 @@ export default function App() {
                     disabled={newPatientCreating}
                     style={{ fontSize: '0.85rem' }}
                   >
-                    {newPatientCreating ? 'Creating Profile...' : '➕ Create Patient Profile'}
+                    {newPatientCreating ? 'Creating Profile...' : 'Create Patient Profile'}
                   </button>
                 </form>
               )}
@@ -4502,7 +4610,7 @@ export default function App() {
                     </div>
                     <div style={{ alignSelf: 'flex-end' }}>
                       <button className="btn btn-primary" onClick={handleRegisterWalkInQueue} disabled={!receptionDoctorId}>
-                        🚶 Register Walk-In & Allocate Token
+                        Register Walk-In & Allocate Token
                       </button>
                     </div>
                   </div>
@@ -4515,7 +4623,7 @@ export default function App() {
           {triageModalEntry && (
             <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
               <div style={{ background: '#0f172a', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem', maxWidth: '440px', width: '90%' }}>
-                <h3 style={{ margin: '0 0 0.5rem 0' }}>⚡ Triage Priority Escalation</h3>
+                <h3 style={{ margin: '0 0 0.5rem 0' }}>Triage Priority Escalation</h3>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
                   Token #{triageModalEntry.tokenNumber} — {triageModalEntry.patientId?.fullName || 'Patient'}
                 </p>
@@ -4565,7 +4673,7 @@ export default function App() {
           {transferModalEntry && (
             <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
               <div style={{ background: '#0f172a', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem', maxWidth: '440px', width: '90%' }}>
-                <h3 style={{ margin: '0 0 0.5rem 0' }}>🔀 Transfer Patient to Doctor</h3>
+                <h3 style={{ margin: '0 0 0.5rem 0' }}>Transfer Patient to Doctor</h3>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
                   Token #{transferModalEntry.tokenNumber} — {transferModalEntry.patientId?.fullName || 'Patient'}
                 </p>
@@ -4621,13 +4729,13 @@ export default function App() {
         <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
             <div>
-              <h2 style={{ margin: 0 }}>🏁 Clinic Day-End Settlement & Reconciliation</h2>
+              <h1 className="page-heading">Clinic Day-End Settlement & Reconciliation</h1>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                 Reconcile active queues, expire unserved patients, auto-generate missing invoices, and close the clinic day.
               </div>
             </div>
             <button className="btn btn-secondary" onClick={loadSettlementPreview}>
-              🔄 Refresh Preview
+              Refresh Preview
             </button>
           </div>
 
@@ -4642,7 +4750,7 @@ export default function App() {
               {/* Status Banner */}
               <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', background: settlementPreview.isClosed ? '#064e3b' : '#1e293b', border: `1px solid ${settlementPreview.isClosed ? '#10b981' : 'var(--border)'}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                 <div>
-                  <strong>Settlement Status:</strong> {settlementPreview.isClosed ? '✓ CLINIC DAY CLOSED' : '⏳ OPEN FOR VISITS'} (Date: {settlementPreview.date})
+                  <strong>Settlement Status:</strong> {settlementPreview.isClosed ? 'CLINIC DAY CLOSED' : 'OPEN FOR VISITS'} (Date: {settlementPreview.date})
                 </div>
                 {settlementPreview.isClosed && (
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -4654,7 +4762,7 @@ export default function App() {
                         disabled={exportLoadingId === settlementPreview.settlement._id}
                         onClick={() => handleExportSettlementCSV(settlementPreview.settlement._id)}
                       >
-                        {exportLoadingId === settlementPreview.settlement._id ? 'Exporting...' : '📥 Export Settlement CSV'}
+                        {exportLoadingId === settlementPreview.settlement._id ? 'Exporting...' : 'Export Settlement CSV'}
                       </button>
                     )}
                     <button
@@ -4663,7 +4771,7 @@ export default function App() {
                       disabled={invoicesExportLoading}
                       onClick={() => handleExportInvoicesCSV(settlementPreview.clinicId || authSession?.user?.staffClinicId, settlementPreview.date)}
                     >
-                      {invoicesExportLoading ? 'Exporting...' : '📥 Export Invoices CSV'}
+                      {invoicesExportLoading ? 'Exporting...' : 'Export Invoices CSV'}
                     </button>
                   </div>
                 )}
@@ -4698,7 +4806,7 @@ export default function App() {
                     {settlementPreview.summary?.inConsultationCount || 0}
                   </div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    {settlementPreview.hasActiveConsultations ? '⚠️ Must finish before closure' : '✓ No rooms active'}
+                    {settlementPreview.hasActiveConsultations ? 'Must finish before closure' : 'No rooms active'}
                   </div>
                 </div>
                 <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
@@ -4713,7 +4821,7 @@ export default function App() {
               {/* Active Consultations Warning if any */}
               {settlementPreview.hasActiveConsultations && (
                 <div style={{ background: '#451a03', border: '1px solid #f59e0b', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
-                  <h4 style={{ color: '#fbbf24', margin: '0 0 0.5rem 0' }}>⚠️ Active Consultations In Progress</h4>
+                  <h2 className="card-title" style={{ color: '#fbbf24', margin: '0 0 0.5rem 0', fontSize: '1.05rem' }}>Active Consultations In Progress</h2>
                   <p style={{ fontSize: '0.85rem', margin: 0 }}>
                     Consultation rooms currently active. Please complete visits before closure or enable force closure:
                   </p>
@@ -4728,7 +4836,7 @@ export default function App() {
               {/* Close Day Action Form (if not closed) */}
               {!settlementPreview.isClosed && (
                 <div style={{ background: '#090d16', padding: '1.25rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.5rem' }}>
-                  <h4 style={{ margin: '0 0 0.5rem 0' }}>Finalize & Close Clinic Day</h4>
+                  <h2 className="card-title" style={{ margin: '0 0 0.5rem 0', fontSize: '1.05rem' }}>Finalize & Close Clinic Day</h2>
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
                     Closing will expire all {settlementPreview.unservedCount || 0} remaining unserved entries, auto-generate invoices for unbilled visits, and record the daily settlement audit ledger.
                   </p>
@@ -4756,7 +4864,7 @@ export default function App() {
                       onClick={handleCloseClinicDay}
                       style={{ alignSelf: 'flex-start' }}
                     >
-                      {settlementLoading ? 'Finalizing Day...' : '🔒 Finalize & Close Clinic Day'}
+                      {settlementLoading ? 'Finalizing Day...' : 'Finalize & Close Clinic Day'}
                     </button>
                   </div>
                 </div>
@@ -4765,7 +4873,7 @@ export default function App() {
               {/* Settlement History Section */}
               <div style={{ background: '#090d16', padding: '1.25rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  <h4 style={{ margin: 0 }}>📜 Settlement History</h4>
+                  <h2 className="card-title" style={{ margin: 0, fontSize: '1.05rem' }}>Settlement History</h2>
                   <button className="btn btn-secondary" style={{ fontSize: '0.75rem' }} onClick={loadSettlementHistory}>
                     Load Past Closures
                   </button>
@@ -4791,7 +4899,7 @@ export default function App() {
                             disabled={exportLoadingId === s._id}
                             onClick={() => handleExportSettlementCSV(s._id)}
                           >
-                            {exportLoadingId === s._id ? 'Exporting...' : '📥 Export CSV'}
+                            {exportLoadingId === s._id ? 'Exporting...' : 'Export CSV'}
                           </button>
                         </div>
                       </div>
@@ -4809,10 +4917,10 @@ export default function App() {
       {/* VIEW: Billing & Invoices */}
       {viewTab === 'billing' && (
         <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
-          <h2>💳 Invoices & Payments</h2>
+          <h1 className="page-heading">Invoices & Payments</h1>
           {currentRole === 'PATIENT' ? (
             <div>
-              <h3>My Invoices</h3>
+              <h2 className="card-title">My Invoices</h2>
               {patientInvoices.length === 0 ? (
                 <div className="empty-state">No invoices issued.</div>
               ) : (
@@ -4850,9 +4958,9 @@ export default function App() {
                 <span className="status-dot-pulse" />
                 <span>Live broadcast kiosk</span>
               </div>
-              <h2 style={{ fontSize: '1.6rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
+              <h1 className="page-heading">
                 Waiting Room Public Display
-              </h2>
+              </h1>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
                 HIPAA/privacy-compliant real-time queue tracker for clinic waiting room monitors
               </div>
@@ -4897,9 +5005,9 @@ export default function App() {
               <div>
                 <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>Active Clinic Station</span>
-                  <h3 style={{ fontSize: '1.8rem', color: 'var(--primary-light)', margin: '0.25rem 0 0 0', fontWeight: 700 }}>
+                  <h2 style={{ fontSize: '1.8rem', color: 'var(--primary-light)', margin: '0.25rem 0 0 0', fontWeight: 700 }}>
                     {publicDisplayData.clinicName || 'Clinic Public Display'}
-                  </h3>
+                  </h2>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
@@ -4975,15 +5083,20 @@ export default function App() {
 
       {/* VIEW: Analytics & Intelligence */}
       {viewTab === 'intelligence' && (
-        <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
-          <h2>🧠 Phase 12 — Queue Intelligence & Operational AI</h2>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+        <div className="card intelligence-card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+          <h1 className="page-heading">Queue Intelligence & Operational Insights</h1>
+          <p className="page-subheading" style={{ marginBottom: '1rem' }}>
             Predictive machine learning models for wait times, consultation durations, congestion forecasts, and operational anomaly detection.
             <strong> Note: ML predictions are advisory only and never alter queue ordering.</strong>
           </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
-            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <h4>Patient Wait Prediction</h4>
+          <div className="intelligence-grid">
+            <div className="intelligence-panel">
+              <div>
+                <h2 className="card-title">Patient Wait Prediction</h2>
+                <div className="card-description">
+                  Query real-time AI wait forecast for your active ticket based on practitioner velocity and arrivals.
+                </div>
+              </div>
               <button className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }} onClick={async () => {
                 if (!patientToken) return alert('Please sign in as Patient');
                 const res = await fetchPatientQueuePrediction(patientToken);
@@ -4992,9 +5105,14 @@ export default function App() {
                 Fetch Live AI Wait Time
               </button>
             </div>
-            <div style={{ background: '#090d16', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <h4>Staff Congestion Intelligence</h4>
-              <button className="btn btn-secondary" style={{ width: '100%', marginTop: '0.5rem' }} onClick={async () => {
+            <div className="intelligence-panel">
+              <div>
+                <h2 className="card-title">Staff Congestion Intelligence</h2>
+                <div className="card-description">
+                  Evaluate real-time clinic congestion metrics, active throughput pacing, and bottleneck alerts.
+                </div>
+              </div>
+              <button className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }} onClick={async () => {
                 const token = staffToken || adminToken;
                 if (!token) return alert('Please sign in as Staff/Admin');
                 const res = await fetchStaffQueueIntelligence(token);
@@ -5012,7 +5130,7 @@ export default function App() {
         <div className="card" style={{ padding: '1.5rem', background: 'var(--card-bg)', borderRadius: '12px', border: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
             <div>
-              <h2 style={{ margin: 0 }}>🛡️ Administrative Governance & Operational Audit</h2>
+              <h1 className="page-heading">Administrative Governance & Operational Audit</h1>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                 Configure clinic operational policies, inspect immutable queue audit logs, and review financial reconciliations.
               </div>
@@ -5023,28 +5141,28 @@ export default function App() {
                 style={{ fontSize: '0.85rem' }}
                 onClick={() => setAdminSubTab('policy')}
               >
-                ⚙️ Clinic Policy
+                Clinic Policy
               </button>
               <button
                 className={`btn ${adminSubTab === 'queue_audit' ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ fontSize: '0.85rem' }}
                 onClick={() => setAdminSubTab('queue_audit')}
               >
-                📜 Queue Audit Trail
+                Queue Audit Trail
               </button>
               <button
                 className={`btn ${adminSubTab === 'financial_audit' ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ fontSize: '0.85rem' }}
                 onClick={() => setAdminSubTab('financial_audit')}
               >
-                💰 Financial Audit
+                Financial Audit
               </button>
               <button
                 className={`btn ${adminSubTab === 'schedules' ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ fontSize: '0.85rem' }}
                 onClick={() => setAdminSubTab('schedules')}
               >
-                📅 Doctor Schedules
+                Doctor Schedules
               </button>
               <button
                 className={`btn ${adminSubTab === 'roster' ? 'btn-primary' : 'btn-secondary'}`}
@@ -5054,7 +5172,7 @@ export default function App() {
                   loadAdminRosterData();
                 }}
               >
-                👥 Roster & Setup Health
+                Roster & Setup Health
               </button>
             </div>
           </div>
@@ -5081,14 +5199,14 @@ export default function App() {
                 if (adminSubTab === 'roster') loadAdminRosterData();
               }}
             >
-              🔄 Refresh Data
+              Refresh Data
             </button>
           </div>
 
           {/* SUB-TAB 1: Clinic Operational Policy */}
           {adminSubTab === 'policy' && (
             <div style={{ background: '#090d16', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.15rem' }}>⚙️ Clinic Operational & Arrival Policies</h3>
+              <h2 className="card-title" style={{ margin: '0 0 0.5rem 0', fontSize: '1.15rem' }}>Clinic Operational & Arrival Policies</h2>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
                 Tune patient arrival windows and settlement lifecycle parameters. Changes take effect immediately on incoming self-check-ins.
               </p>
@@ -5169,7 +5287,7 @@ export default function App() {
                 </div>
 
                 <button type="submit" className="btn btn-primary" disabled={policyLoading} style={{ alignSelf: 'flex-start' }}>
-                  {policyLoading ? 'Saving Policy...' : '💾 Save Policy Settings'}
+                  {policyLoading ? 'Saving Policy...' : 'Save Policy Settings'}
                 </button>
               </form>
             </div>
@@ -5180,7 +5298,7 @@ export default function App() {
             <div style={{ background: '#090d16', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.15rem' }}>📜 Operational Queue Audit Ledger</h3>
+                  <h2 className="card-title" style={{ margin: 0, fontSize: '1.15rem' }}>Operational Queue Audit Ledger</h2>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                     Immutable append-only record of all check-ins, triages, transfers, skips, and day-end expirations.
                   </div>
@@ -5302,7 +5420,7 @@ export default function App() {
             <div style={{ background: '#090d16', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
                 <div>
-                  <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '1.15rem' }}>📅 Doctor Schedules & Consultation Duration Management</h3>
+                  <h2 className="card-title" style={{ margin: '0 0 0.35rem 0', fontSize: '1.15rem' }}>Doctor Schedules & Consultation Duration Management</h2>
                   <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                     Inspect and configure weekly recurring working days, shift intervals, breaks, and consultation slot durations across all clinic doctors.
                   </p>
@@ -5317,14 +5435,14 @@ export default function App() {
                     onClick={loadAdminDoctors}
                     disabled={adminDoctorsLoading}
                   >
-                    {adminDoctorsLoading ? 'Refreshing...' : '🔄 Refresh Roster'}
+                    {adminDoctorsLoading ? 'Refreshing...' : 'Refresh Roster'}
                   </button>
                 </div>
               </div>
 
               {adminDoctorsError && (
                 <div style={{ background: '#451a03', border: '1px solid #f59e0b', color: '#fef3c7', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.85rem' }}>
-                  ⚠️ {adminDoctorsError}
+                  {adminDoctorsError}
                 </div>
               )}
 
@@ -5413,15 +5531,15 @@ export default function App() {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', marginTop: '0.35rem' }}>
                               {doc.hasSchedule && doc.workingDays?.length > 0 ? (
                                 <span style={{ color: 'var(--status-success)', fontWeight: 500 }}>
-                                  🗓️ {formatWorkingDays(doc.workingDays)}
+                                  {formatWorkingDays(doc.workingDays)}
                                 </span>
                               ) : (
                                 <span style={{ color: 'var(--text-dim)', fontStyle: 'italic' }}>
-                                  ⚠️ Not Configured
+                                  Not Configured
                                 </span>
                               )}
                               <span style={{ color: 'var(--text-muted)' }}>
-                                ⏱️ {doc.averageConsultationDurationMinutes || 15}m
+                                {doc.averageConsultationDurationMinutes || 15}m
                               </span>
                             </div>
                           </div>
@@ -5443,9 +5561,9 @@ export default function App() {
                       <div className="admin-doc-editor-header">
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                            <h4 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--text-main)' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.2rem', color: 'var(--text-main)' }}>
                               {formatDoctorName(selectedAdminDoctor.fullName)}
-                            </h4>
+                            </h3>
                             <span className="badge badge-primary" style={{ fontSize: '0.72rem' }}>
                               {selectedAdminDoctor.specialtyId?.name || 'General'}
                             </span>
@@ -5488,13 +5606,19 @@ export default function App() {
 
                       {/* Warnings if Doctor or Clinic Inactive */}
                       {selectedAdminDoctor.clinicId?.isActive === false && (
-                        <div style={{ background: '#451a03', border: '1px solid #f59e0b', color: '#fef3c7', padding: '0.65rem 0.85rem', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.8rem' }}>
-                          ⚠️ <strong>Notice:</strong> The associated clinic <em>{selectedAdminDoctor.clinicId?.name}</em> is marked INACTIVE. Schedule changes will be saved to the database, but patients cannot book appointments while the clinic is inactive.
+                        <div style={{ background: '#451a03', border: '1px solid #f59e0b', color: '#fef3c7', padding: '0.65rem 0.85rem', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.8rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                          <IconAlert style={{ flexShrink: 0, marginTop: '2px' }} />
+                          <div>
+                            <strong>Notice:</strong> The associated clinic <em>{selectedAdminDoctor.clinicId?.name}</em> is marked INACTIVE. Schedule changes will be saved to the database, but patients cannot book appointments while the clinic is inactive.
+                          </div>
                         </div>
                       )}
                       {selectedAdminDoctor.isActive === false && (
-                        <div style={{ background: '#450a0a', border: '1px solid #ef4444', color: '#fee2e2', padding: '0.65rem 0.85rem', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.8rem' }}>
-                          ⚠️ <strong>Notice:</strong> This doctor record is marked INACTIVE. The doctor will not appear in patient discovery searches until activated.
+                        <div style={{ background: '#450a0a', border: '1px solid #ef4444', color: '#fee2e2', padding: '0.65rem 0.85rem', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.8rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                          <IconAlert style={{ flexShrink: 0, marginTop: '2px' }} />
+                          <div>
+                            <strong>Notice:</strong> This doctor record is marked INACTIVE. The doctor will not appear in patient discovery searches until activated.
+                          </div>
                         </div>
                       )}
 
@@ -5510,7 +5634,7 @@ export default function App() {
                           onClick={handleApplyMonToFriPreset}
                           title="Set Mon-Fri 09:00-13:00 and 16:00-20:00"
                         >
-                          ⚡ Mon–Fri (Two Shifts: 9-1, 4-8)
+                          Mon–Fri (Two Shifts: 9–1, 4–8)
                         </button>
                         <button
                           type="button"
@@ -5519,7 +5643,7 @@ export default function App() {
                           onClick={handleApplySingleShiftPreset}
                           title="Set Mon-Sat 09:00-17:00 with 1h Lunch Break"
                         >
-                          ⚡ Mon–Sat (9-5 + Lunch)
+                          Mon–Sat (9–5 + Lunch)
                         </button>
                         <button
                           type="button"
@@ -5528,7 +5652,7 @@ export default function App() {
                           onClick={handleMarkAllOffDuty}
                           title="Set all days to off-duty"
                         >
-                          🚫 Mark All Off-Duty
+                          Mark All Off-Duty
                         </button>
                         <button
                           type="button"
@@ -5601,8 +5725,8 @@ export default function App() {
                                     Working Shifts:
                                   </div>
                                   {(!dayObj.shifts || dayObj.shifts.length === 0) ? (
-                                    <div style={{ color: 'var(--status-danger)', fontSize: '0.78rem', fontStyle: 'italic', marginBottom: '0.35rem' }}>
-                                      ⚠️ At least one shift is required for working days. Click "+ Add Shift".
+                                    <div style={{ color: 'var(--status-danger)', fontSize: '0.78rem', fontStyle: 'italic', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                      <IconAlert /> At least one shift is required for working days. Click "+ Add Shift".
                                     </div>
                                   ) : (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
@@ -5723,7 +5847,7 @@ export default function App() {
                           onClick={handleSaveSchedule}
                           disabled={scheduleSaving}
                         >
-                          {scheduleSaving ? '💾 Saving Schedule...' : `💾 Save Schedule for ${formatDoctorName(selectedAdminDoctor.fullName)}`}
+                          {scheduleSaving ? 'Saving Schedule...' : `Save Schedule for ${formatDoctorName(selectedAdminDoctor.fullName)}`}
                         </button>
                         <button
                           type="button"
@@ -5747,7 +5871,7 @@ export default function App() {
             <div style={{ background: '#090d16', padding: '1.5rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.15rem' }}>💰 Financial & Payment Audit Trail</h3>
+                  <h2 className="card-title" style={{ margin: 0, fontSize: '1.15rem' }}>Financial & Payment Audit Trail</h2>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                     Immutable ledger of all invoice issues, payment settlements, and refund events.
                   </div>
@@ -5854,7 +5978,7 @@ export default function App() {
               {/* Header */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
                 <div>
-                  <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '1.15rem' }}>👥 Operational Roster & Setup Health Inspector</h3>
+                  <h2 className="card-title" style={{ margin: '0 0 0.35rem 0', fontSize: '1.15rem' }}>Operational Roster & Setup Health Inspector</h2>
                   <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                     Inspect clinic readiness, doctor schedule coverage, staff clinic assignments, and active/inactive operational status across the platform.
                   </p>
@@ -5865,7 +5989,7 @@ export default function App() {
                   onClick={loadAdminRosterData}
                   disabled={adminClinicsLoading || adminStaffLoading || adminDoctorsLoading}
                 >
-                  {adminClinicsLoading || adminStaffLoading || adminDoctorsLoading ? 'Refreshing...' : '🔄 Refresh Roster'}
+                  {adminClinicsLoading || adminStaffLoading || adminDoctorsLoading ? 'Refreshing...' : 'Refresh Roster'}
                 </button>
               </div>
 
@@ -5881,8 +6005,11 @@ export default function App() {
                 return (
                   <div>
                     {hasIssues && (
-                      <div style={{ background: '#451a03', border: '1px solid #f59e0b', color: '#fef3c7', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1.25rem', fontSize: '0.85rem' }}>
-                        <strong>⚠️ Operational Setup Notice:</strong> QFlow detected {unscheduledDoctors > 0 ? `${unscheduledDoctors} doctor(s) without schedules, ` : ''}{clinicsWithoutStaff > 0 ? `${clinicsWithoutStaff} clinic(s) without staff, ` : ''}{inactiveClinics > 0 ? `${inactiveClinics} inactive clinic(s), ` : ''}{inactiveDoctors > 0 ? `${inactiveDoctors} inactive doctor(s).` : ''} Review below to ensure smooth reception operations.
+                      <div style={{ background: '#451a03', border: '1px solid #f59e0b', color: '#fef3c7', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1.25rem', fontSize: '0.85rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                        <IconAlert style={{ flexShrink: 0, marginTop: '2px' }} />
+                        <div>
+                          <strong>Operational Setup Notice:</strong> QFlow detected {unscheduledDoctors > 0 ? `${unscheduledDoctors} doctor(s) without schedules, ` : ''}{clinicsWithoutStaff > 0 ? `${clinicsWithoutStaff} clinic(s) without staff, ` : ''}{inactiveClinics > 0 ? `${inactiveClinics} inactive clinic(s), ` : ''}{inactiveDoctors > 0 ? `${inactiveDoctors} inactive doctor(s).` : ''} Review below to ensure smooth reception operations.
+                        </div>
                       </div>
                     )}
 
@@ -5984,9 +6111,9 @@ export default function App() {
                   {/* CLINICS SECTION */}
                   {(adminRosterFilter === 'ALL' || adminRosterFilter === 'CLINICS') && (
                     <div>
-                      <h4 style={{ margin: '0 0 0.6rem 0', color: '#38bdf8', fontSize: '0.95rem' }}>
-                        🏥 Clinics ({adminClinics.length})
-                      </h4>
+                      <h3 style={{ margin: '0 0 0.6rem 0', color: '#38bdf8', fontSize: '0.95rem' }}>
+                        Clinics ({adminClinics.length})
+                      </h3>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: '0.75rem' }}>
                         {adminClinics
                           .filter((c) => {
@@ -6042,9 +6169,9 @@ export default function App() {
                   {/* DOCTORS SECTION */}
                   {(adminRosterFilter === 'ALL' || adminRosterFilter === 'DOCTORS') && (
                     <div>
-                      <h4 style={{ margin: '0 0 0.6rem 0', color: '#a855f7', fontSize: '0.95rem' }}>
-                        👨‍⚕️ Doctors ({adminDoctors.length})
-                      </h4>
+                      <h3 style={{ margin: '0 0 0.6rem 0', color: '#a855f7', fontSize: '0.95rem' }}>
+                        Doctors ({adminDoctors.length})
+                      </h3>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: '0.75rem' }}>
                         {adminDoctors
                           .filter((d) => {
@@ -6085,7 +6212,7 @@ export default function App() {
                               </div>
                               <div style={{ fontSize: '0.75rem', borderTop: '1px solid var(--border)', paddingTop: '0.4rem', marginTop: '0.5rem', display: 'flex', justifyContent: 'space-between' }}>
                                 <span style={{ color: doc.hasSchedule ? '#10b981' : '#f59e0b' }}>
-                                  {doc.hasSchedule ? '✓ Schedule Configured' : '⚠️ No Schedule'}
+                                  {doc.hasSchedule ? '✓ Schedule Configured' : 'No Schedule Configured'}
                                 </span>
                                 <button
                                   className="btn btn-secondary"
@@ -6107,9 +6234,9 @@ export default function App() {
                   {/* STAFF SECTION */}
                   {(adminRosterFilter === 'ALL' || adminRosterFilter === 'STAFF') && (
                     <div>
-                      <h4 style={{ margin: '0 0 0.6rem 0', color: '#10b981', fontSize: '0.95rem' }}>
-                        👔 Staff Operators ({adminStaffList.length})
-                      </h4>
+                      <h3 style={{ margin: '0 0 0.6rem 0', color: '#10b981', fontSize: '0.95rem' }}>
+                        Staff Operators ({adminStaffList.length})
+                      </h3>
                       {adminStaffList.length === 0 ? (
                         <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No staff members registered.</div>
                       ) : (
@@ -6180,9 +6307,9 @@ export default function App() {
             >
               ×
             </button>
-            <h3 style={{ fontSize: '1.25rem', color: 'var(--status-danger)', margin: '0 0 0.5rem 0' }}>
+            <h2 style={{ fontSize: '1.25rem', color: 'var(--status-danger)', margin: '0 0 0.5rem 0' }}>
               Cancel Consultation Appointment
-            </h3>
+            </h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
               Are you sure you want to cancel this appointment? The patient will be notified and this slot will be released back to available capacity.
             </p>
@@ -6195,7 +6322,7 @@ export default function App() {
 
             {doctorCancelModal.error && (
               <div style={{ background: '#450a0a', border: '1px solid #ef4444', color: '#fee2e2', padding: '0.65rem', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.85rem' }}>
-                ⚠️ {doctorCancelModal.error}
+                {doctorCancelModal.error}
               </div>
             )}
 
@@ -6241,7 +6368,7 @@ export default function App() {
         <div className="modal-overlay" onClick={() => setShowNotificationDrawer(false)}>
           <div className="modal-content" style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setShowNotificationDrawer(false)}>×</button>
-            <h3 style={{ margin: '0 0 1rem 0', color: 'var(--primary)' }}>🔔 In-App Notifications ({unreadCount} unread)</h3>
+            <h2 style={{ margin: '0 0 1rem 0', color: 'var(--text-main)', fontSize: '1.2rem', fontWeight: 600 }}>Notifications ({unreadCount} unread)</h2>
 
             {notifications.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
@@ -6595,7 +6722,9 @@ export default function App() {
         <div className="modal-overlay" onClick={() => setBookingSuccess(null)}>
           <div className="modal-content" style={{ maxWidth: '480px', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setBookingSuccess(null)}>×</button>
-            <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🎉</div>
+            <div className="appointment-success-badge">
+              <IconCheck />
+            </div>
             <h2 style={{ fontSize: '1.35rem', fontWeight: 700, margin: '0 0 0.5rem 0', color: 'var(--text-main)' }}>
               Appointment Confirmed!
             </h2>
@@ -6629,7 +6758,7 @@ export default function App() {
             </div>
 
             <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginBottom: '1.25rem', lineHeight: 1.4 }}>
-              ℹ️ Please arrive at the clinic 15–30 minutes prior to your slot time for check-in and queue token generation.
+              Please arrive at the clinic 15–30 minutes prior to your slot time for check-in and queue token generation.
             </div>
 
             <div style={{ display: 'flex', gap: '0.75rem' }}>
@@ -6642,7 +6771,7 @@ export default function App() {
                   setViewTab('my_appointments');
                 }}
               >
-                📅 View in My Appointments
+                View in My Appointments
               </button>
               <button
                 type="button"
@@ -6661,7 +6790,7 @@ export default function App() {
       {import.meta.env.DEV && (
         <details className="developer-tools-drawer">
           <summary>
-            🛠️ Developer Tools & Raw JWT Token Inspector (Collapsible)
+            Developer Tools & Raw JWT Token Inspector (Collapsible)
           </summary>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem', marginTop: '1rem', fontSize: '0.75rem' }}>
             <div>
