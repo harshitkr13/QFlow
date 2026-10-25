@@ -748,6 +748,8 @@ export const checkInAppointment = async (req, res, next) => {
           queueDate: queueEntry.queueDate,
           source: queueEntry.source,
           status: queueEntry.status,
+          priority: queueEntry.priority,
+          doctorId: queueEntry.doctorId,
           joinedAt: queueEntry.joinedAt,
         },
       });

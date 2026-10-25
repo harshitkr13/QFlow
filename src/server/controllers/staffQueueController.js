@@ -358,7 +358,9 @@ export const getTodayQueue = async (req, res, next) => {
     const queueDate = getFormattedDateIST();
     const baseFilter = { queueDate };
     if (clinicId) baseFilter.clinicId = clinicId;
-    if (doctorIdFilter) baseFilter.doctorId = doctorIdFilter;
+    if (doctorIdFilter && mongoose.Types.ObjectId.isValid(doctorIdFilter)) {
+      baseFilter.doctorId = doctorIdFilter;
+    }
 
     // Fetch WAITING entries with HYBRID sorting: priorityWeight ASC, effectiveSlotMinutes ASC, joinedAt ASC, tokenNumber ASC
     const waitingEntries = await QueueEntry.find({ ...baseFilter, status: 'WAITING' })
@@ -393,7 +395,7 @@ export const getTodayQueue = async (req, res, next) => {
 
     // Fetch doctor queue pause details if doctorIdFilter provided
     let doctorQueueStatus = { isQueuePaused: false, queuePausedAt: null, queuePauseReason: null };
-    if (doctorIdFilter) {
+    if (doctorIdFilter && mongoose.Types.ObjectId.isValid(doctorIdFilter)) {
       const doc = await Doctor.findById(doctorIdFilter).select('isQueuePaused queuePausedAt queuePauseReason queuePausedDate');
       if (doc && doc.isQueuePaused && doc.queuePausedDate === queueDate) {
         doctorQueueStatus = {
@@ -409,6 +411,8 @@ export const getTodayQueue = async (req, res, next) => {
       count: queueEntries.length,
       queueDate,
       doctorQueueStatus,
+      doctorStatus: doctorQueueStatus,
+      queue: queueEntries,
       queueEntries,
       waitingEntries,
       activeEntries,

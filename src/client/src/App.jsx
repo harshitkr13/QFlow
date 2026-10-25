@@ -948,11 +948,14 @@ export default function App() {
 
     // Fetch today's queue for doctor's clinic
     const todayRes = await fetchTodayStaffQueue(doctorToken);
-    if (todayRes.ok && todayRes.data?.queue) {
-      const allQueue = todayRes.data.queue;
+    const queueList = todayRes.data?.queue || todayRes.data?.queueEntries;
+    if (todayRes.ok && queueList) {
+      const allQueue = queueList;
       // Filter for this doctor's patients
       const myDoctorId = intelRes.data?.data?.doctorId;
-      const myQueue = myDoctorId ? allQueue.filter((q) => q.doctorId?.toString() === myDoctorId) : allQueue;
+      const myQueue = myDoctorId
+        ? allQueue.filter((q) => (q.doctorId?._id || q.doctorId)?.toString() === myDoctorId?.toString())
+        : allQueue;
 
       const active = myQueue.find((q) => q.status === 'IN_CONSULTATION' || q.status === 'CALLED');
       setDoctorActivePatient(active || null);
@@ -1408,26 +1411,40 @@ export default function App() {
     if (res.ok && res.data.queueEntry) {
       setAllocatedTokenCard(res.data.queueEntry);
       setSelectedStaffPatient(null);
-      loadTodayStaffQueue();
+      const walkInDocId = (res.data.queueEntry.doctorId?._id || res.data.queueEntry.doctorId)?.toString();
+      if (walkInDocId) {
+        setReceptionDoctorId(walkInDocId);
+        loadTodayStaffQueue(walkInDocId);
+      } else {
+        loadTodayStaffQueue();
+      }
     } else {
       setReceptionMessage(`Error: ${res.data?.message || res.error}`);
     }
   };
 
-  const loadTodayStaffQueue = useCallback(async () => {
+  const loadTodayStaffQueue = useCallback(async (selectedDocId) => {
     if (!staffToken) return;
-    const res = await fetchTodayStaffQueue(staffToken);
+    const docId = typeof selectedDocId === 'string' && selectedDocId.trim() !== '' ? selectedDocId : receptionDoctorId;
+    const params = {};
+    if (docId) params.doctorId = docId;
+    const res = await fetchTodayStaffQueue(staffToken, params);
     if (res.ok && res.data) {
-      const queue = res.data.queue || [];
-      setWaitingEntries(queue.filter((q) => q.status === 'WAITING'));
-      setActiveEntries(queue.filter((q) => q.status === 'CALLED' || q.status === 'IN_CONSULTATION'));
-      setSkippedEntries(queue.filter((q) => q.status === 'SKIPPED'));
-      setTerminalEntries(queue.filter((q) => ['COMPLETED', 'NO_SHOW', 'CANCELLED'].includes(q.status)));
-      if (res.data.doctorStatus) {
-        setDoctorQueueStatus(res.data.doctorStatus);
+      const queue = res.data.queue || res.data.queueEntries || [];
+      const waiting = res.data.waitingEntries || queue.filter((q) => q.status === 'WAITING');
+      const active = res.data.activeEntries || queue.filter((q) => q.status === 'CALLED' || q.status === 'IN_CONSULTATION');
+      const skipped = res.data.skippedEntries || queue.filter((q) => q.status === 'SKIPPED');
+      const terminal = res.data.terminalEntries || queue.filter((q) => ['COMPLETED', 'NO_SHOW', 'CANCELLED'].includes(q.status));
+      setWaitingEntries(waiting);
+      setActiveEntries(active);
+      setSkippedEntries(skipped);
+      setTerminalEntries(terminal);
+      const docStatus = res.data.doctorQueueStatus || res.data.doctorStatus;
+      if (docStatus) {
+        setDoctorQueueStatus(docStatus);
       }
     }
-  }, [staffToken]);
+  }, [staffToken, receptionDoctorId]);
 
   const loadStaffAppointments = useCallback(async (dateOverride, statusOverride) => {
     if (!staffToken) return;
@@ -1458,7 +1475,14 @@ export default function App() {
       setAllocatedTokenCard(qEntry);
       setReceptionMessage(`✅ Patient checked in successfully! Allocated Queue Token #${qEntry?.tokenNumber}`);
       loadStaffAppointments();
-      loadTodayStaffQueue();
+      const targetDocId = res.data.appointment?.doctorId || qEntry?.doctorId;
+      if (targetDocId) {
+        const docIdStr = (targetDocId._id || targetDocId).toString();
+        setReceptionDoctorId(docIdStr);
+        loadTodayStaffQueue(docIdStr);
+      } else {
+        loadTodayStaffQueue();
+      }
     } else {
       setReceptionMessage(`⚠️ Check-In Failed: ${res.data?.message || res.error || 'Check-in period not open or expired'}`);
     }
@@ -3732,7 +3756,10 @@ export default function App() {
               type="button"
               className={`btn ${receptionSubTab === 'queue' ? 'btn-primary' : 'btn-secondary'}`}
               style={{ fontSize: '0.85rem' }}
-              onClick={() => setReceptionSubTab('queue')}
+              onClick={() => {
+                setReceptionSubTab('queue');
+                loadTodayStaffQueue();
+              }}
             >
               📋 Live Queue Operations
             </button>
@@ -3782,7 +3809,11 @@ export default function App() {
                     className="filter-input"
                     style={{ minWidth: '180px' }}
                     value={receptionDoctorId}
-                    onChange={(e) => setReceptionDoctorId(e.target.value)}
+                    onChange={(e) => {
+                      const newDocId = e.target.value;
+                      setReceptionDoctorId(newDocId);
+                      loadTodayStaffQueue(newDocId);
+                    }}
                   >
                     {doctors.map((d) => (
                       <option key={d._id} value={d._id}>Dr. {d.fullName} ({d.specialtyId?.name || 'Doctor'})</option>
@@ -3799,7 +3830,7 @@ export default function App() {
                   <button className="btn btn-secondary" disabled={opLoading || !receptionDoctorId} onClick={handleResumeQueue}>
                     ▶ Resume Queue
                   </button>
-                  <button className="btn btn-secondary" onClick={loadTodayStaffQueue}>
+                  <button className="btn btn-secondary" onClick={() => loadTodayStaffQueue()}>
                     🔄 Refresh Queue
                   </button>
                 </div>
