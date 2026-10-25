@@ -65,6 +65,7 @@ import {
   fetchStaffAppointments,
   fetchAdminClinics,
   fetchAdminStaff,
+  apiConfigError,
 } from './services/api';
 import './App.css';
 
@@ -2555,6 +2556,24 @@ export default function App() {
 
       {/* Main Application Container Canvas */}
       <main className="app-container">
+        {apiConfigError && (
+          <div
+            className="api-config-error-banner"
+            style={{
+              background: '#450a0a',
+              border: '2px solid #ef4444',
+              borderRadius: '8px',
+              padding: '1.25rem',
+              marginBottom: '1.5rem',
+              color: '#fee2e2',
+            }}
+          >
+            <div style={{ fontWeight: 'bold', fontSize: '1rem', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span>⚠️</span> Configuration Error
+            </div>
+            <div style={{ fontSize: '0.875rem', lineHeight: '1.4' }}>{apiConfigError}</div>
+          </div>
+        )}
 
       {/* VIEW: Doctor Examination Cockpit (Phase 13) */}
       {/* VIEW: Doctor Examination Cockpit & Workspace (Phase 5) */}
@@ -6632,30 +6651,32 @@ export default function App() {
         </div>
       )}
 
-      {/* Developer Collapsible Toolbar (Preserved for Testing & Backward Compatibility) */}
-      <details className="developer-tools-drawer">
-        <summary>
-          🛠️ Developer Tools & Raw JWT Token Inspector (Collapsible)
-        </summary>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem', marginTop: '1rem', fontSize: '0.75rem' }}>
-          <div>
-            <span style={{ color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem' }}>Patient Token:</span>
-            <input type="text" className="filter-input" style={{ width: '100%' }} value={patientToken} onChange={(e) => setPatientToken(e.target.value)} />
+      {/* Developer Collapsible Toolbar (Rendered strictly in local development) */}
+      {import.meta.env.DEV && (
+        <details className="developer-tools-drawer">
+          <summary>
+            🛠️ Developer Tools & Raw JWT Token Inspector (Collapsible)
+          </summary>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem', marginTop: '1rem', fontSize: '0.75rem' }}>
+            <div>
+              <span style={{ color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem' }}>Patient Token:</span>
+              <input type="text" className="filter-input" style={{ width: '100%' }} value={patientToken} onChange={(e) => setPatientToken(e.target.value)} />
+            </div>
+            <div>
+              <span style={{ color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem' }}>Staff Token:</span>
+              <input type="text" className="filter-input" style={{ width: '100%' }} value={staffToken} onChange={(e) => setStaffToken(e.target.value)} />
+            </div>
+            <div>
+              <span style={{ color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem' }}>Doctor Token:</span>
+              <input type="text" className="filter-input" style={{ width: '100%' }} value={doctorToken} onChange={(e) => setDoctorToken(e.target.value)} />
+            </div>
+            <div>
+              <span style={{ color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem' }}>Admin Token:</span>
+              <input type="text" className="filter-input" style={{ width: '100%' }} value={adminToken} onChange={(e) => setAdminToken(e.target.value)} />
+            </div>
           </div>
-          <div>
-            <span style={{ color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem' }}>Staff Token:</span>
-            <input type="text" className="filter-input" style={{ width: '100%' }} value={staffToken} onChange={(e) => setStaffToken(e.target.value)} />
-          </div>
-          <div>
-            <span style={{ color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem' }}>Doctor Token:</span>
-            <input type="text" className="filter-input" style={{ width: '100%' }} value={doctorToken} onChange={(e) => setDoctorToken(e.target.value)} />
-          </div>
-          <div>
-            <span style={{ color: 'var(--text-dim)', display: 'block', marginBottom: '0.25rem' }}>Admin Token:</span>
-            <input type="text" className="filter-input" style={{ width: '100%' }} value={adminToken} onChange={(e) => setAdminToken(e.target.value)} />
-          </div>
-        </div>
-      </details>
+        </details>
+      )}
       </main>
     </div>
   );

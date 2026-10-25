@@ -1,7 +1,44 @@
 /**
  * API service helper for HTTP requests to Express backend.
  */
-const API_BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '/api';
+/**
+ * Resolves the base URL for API requests.
+ * - In deployed environments (staging/production), requires an explicit VITE_API_URL.
+ * - In local development (DEV = true), falls back to '/api' for Vite's localhost proxy.
+ * - Fails closed with an explicit error if VITE_API_URL is missing in non-dev environments.
+ * @param {Object} env - Environment object (defaults to import.meta.env)
+ * @returns {string} Normalized API base URL
+ */
+export const resolveApiBaseUrl = (env = (typeof import.meta !== 'undefined' ? import.meta.env : {})) => {
+  const isDev = Boolean(env?.DEV);
+  const configuredUrl = typeof env?.VITE_API_URL === 'string' ? env.VITE_API_URL.trim() : '';
+
+  if (configuredUrl) {
+    return configuredUrl.replace(/\/+$/, '');
+  }
+
+  if (isDev) {
+    return '/api';
+  }
+
+  throw new Error(
+    '[FATAL CONFIGURATION ERROR] Missing required environment variable "VITE_API_URL". ' +
+    'Deployed frontend builds must explicitly configure VITE_API_URL in project environment settings ' +
+    '(e.g., https://qflow-backend-staging.onrender.com/api for staging, or https://<prod-backend>/api for production).'
+  );
+};
+
+export let API_BASE_URL = '';
+export let apiConfigError = null;
+
+try {
+  API_BASE_URL = resolveApiBaseUrl(typeof import.meta !== 'undefined' ? import.meta.env : {});
+} catch (err) {
+  API_BASE_URL = '';
+  apiConfigError = err.message;
+}
+
+export const getApiConfigError = () => apiConfigError;
 
 export const fetchHealthStatus = async () => {
   try {

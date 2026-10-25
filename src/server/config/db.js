@@ -32,7 +32,7 @@ export const parseDatabaseName = (uri) => {
  */
 export const isProtectedDatabase = (dbName) => {
   if (!dbName || typeof dbName !== 'string') return false;
-  const protectedNames = ['qflow'];
+  const protectedNames = ['qflow', 'qflow_staging', 'qflow_prod'];
   return protectedNames.includes(dbName.trim().toLowerCase());
 };
 

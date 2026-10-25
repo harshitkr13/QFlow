@@ -47,24 +47,69 @@ export const validateEnvironment = (env = process.env) => {
 
   // 2. MongoDB URI & Database Isolation Validation
   const mongoUri = env.MONGODB_URI;
-  if (isProdOrStaging) {
+
+  if (nodeEnv === 'production') {
     if (!mongoUri || typeof mongoUri !== 'string' || mongoUri.trim() === '') {
-      errors.push(`MONGODB_URI is required in ${nodeEnv} environment.`);
+      errors.push('MONGODB_URI is required in production environment.');
     } else if (!/^mongodb(?:\+srv)?:\/\//i.test(mongoUri.trim())) {
       errors.push('MONGODB_URI must be a valid MongoDB connection string starting with mongodb:// or mongodb+srv://.');
     } else {
       const dbName = parseDatabaseName(mongoUri.trim());
-      if (nodeEnv === 'staging') {
+      if (!dbName) {
+        errors.push('Production environment (NODE_ENV=production) requires an explicit database name in MONGODB_URI.');
+      } else if (dbName !== 'qflow_prod') {
+        errors.push(
+          `FATAL ISOLATION VIOLATION: Production environment (NODE_ENV=production) must strictly target database "qflow_prod". Rejected target database: "${dbName}".`
+        );
+      }
+    }
+  } else if (nodeEnv === 'staging') {
+    if (!mongoUri || typeof mongoUri !== 'string' || mongoUri.trim() === '') {
+      errors.push('MONGODB_URI is required in staging environment.');
+    } else if (!/^mongodb(?:\+srv)?:\/\//i.test(mongoUri.trim())) {
+      errors.push('MONGODB_URI must be a valid MongoDB connection string starting with mongodb:// or mongodb+srv://.');
+    } else {
+      const dbName = parseDatabaseName(mongoUri.trim());
+      if (!dbName) {
+        errors.push('Staging environment (NODE_ENV=staging) requires an explicit database name in MONGODB_URI.');
+      } else if (dbName !== 'qflow_staging') {
+        errors.push(
+          `FATAL ISOLATION VIOLATION: Staging environment (NODE_ENV=staging) must strictly target database "qflow_staging". Rejected target database: "${dbName}".`
+        );
+      }
+    }
+  } else if (nodeEnv === 'development') {
+    if (mongoUri) {
+      if (!/^mongodb(?:\+srv)?:\/\//i.test(mongoUri.trim())) {
+        errors.push('MONGODB_URI must be a valid MongoDB connection string starting with mongodb:// or mongodb+srv://.');
+      } else {
+        const dbName = parseDatabaseName(mongoUri.trim());
         if (!dbName) {
-          errors.push('Staging MONGODB_URI must explicitly specify a database name (e.g. qflow_staging).');
-        } else if (dbName.toLowerCase() === 'qflow') {
+          errors.push('Development environment (NODE_ENV=development) requires an explicit database name in MONGODB_URI.');
+        } else if (dbName === 'qflow_prod' || dbName === 'qflow_staging') {
           errors.push(
-            'FATAL ISOLATION VIOLATION: Staging environment cannot target the persistent development database "qflow". ' +
-            'Please configure a dedicated staging database (e.g. qflow_staging).'
+            `FATAL ISOLATION VIOLATION: Development environment cannot target production or staging database "${dbName}".`
+          );
+        } else if (dbName !== 'qflow') {
+          errors.push(
+            `FATAL ISOLATION VIOLATION: Development environment must use approved database "qflow". Rejected target database: "${dbName}".`
           );
         }
       }
     }
+  } else if (nodeEnv === 'test') {
+    if (mongoUri) {
+      const dbName = parseDatabaseName(mongoUri.trim());
+      if (dbName && ['qflow', 'qflow_staging', 'qflow_prod'].includes(dbName.toLowerCase())) {
+        errors.push(
+          `FATAL ISOLATION VIOLATION: Test environment cannot target protected database "${dbName}".`
+        );
+      }
+    }
+  } else {
+    errors.push(
+      `FATAL CONFIGURATION ERROR: Unrecognized NODE_ENV "${nodeEnv}". Allowed environments: development, staging, production, test.`
+    );
   }
 
   // 3. Port Validation
